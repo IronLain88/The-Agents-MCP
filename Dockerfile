@@ -2,15 +2,19 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Copy package files
 COPY package.json package-lock.json ./
 RUN npm ci --production
 
-# Copy compiled code
 COPY dist/ ./dist/
 
-# Environment defaults
 ENV NODE_ENV=production
 
-# Run MCP server
+# Default values (override with docker-compose env)
+ENV HUB_URL=http://localhost:3000
+ENV AGENT_ID=agent
+ENV AGENT_NAME=Agent
+ENV AGENT_SPRITE=Yuki
+ENV OWNER_ID=owner
+ENV OWNER_NAME=Owner
+
 CMD ["node", "dist/index.js"]
