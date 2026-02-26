@@ -317,8 +317,10 @@ server.tool(
     station: z.string().optional().describe("Agent state when at this asset"),
     approach: z.enum(["above", "below", "left", "right"]).optional().describe("Approach direction"),
     collision: z.boolean().optional().describe("Block movement"),
+    remote_url: z.string().optional().describe("Remote hub URL for remote board assets"),
+    remote_station: z.string().optional().describe("Station name on the remote hub to read"),
   },
-  async ({ name, tileset, tx, ty, x, y, station, approach, collision }) => {
+  async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station }) => {
     try {
       const body: Record<string, unknown> = { name };
       if (tileset !== undefined) body.tileset = tileset;
@@ -329,6 +331,8 @@ server.tool(
       if (station) body.station = station;
       if (approach) body.approach = approach;
       if (collision !== undefined) body.collision = collision;
+      if (remote_url) body.remote_url = remote_url;
+      if (remote_station) body.remote_station = remote_station;
 
       const res = await fetch(`${HUB_URL}/api/assets`, {
         method: "POST",
