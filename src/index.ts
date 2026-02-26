@@ -3,7 +3,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { readFile } from "fs/promises";
 import { findAsset } from "./lib/asset-lookup.js";
-import { createStationLogger } from "./lib/station-logger.js";
 import { execSync } from "child_process";
 import WebSocket from "ws";
 import { resolve, sep } from "path";
@@ -61,7 +60,7 @@ function detectRepo(): { id: string; name: string } {
   return { id: "workspace", name: "Workspace" };
 }
 
-const HUB_URL = process.env.HUB_URL || "http://localhost:3000";
+const HUB_URL = (process.env.HUB_URL || "http://localhost:3000").replace(/\/+$/, "");
 // L3: Validate HUB_URL
 try {
   const parsed = new URL(HUB_URL);
@@ -91,19 +90,14 @@ const repo = detectRepo();
 const OWNER_ID = process.env.OWNER_ID || repo.id;
 const OWNER_NAME = process.env.OWNER_NAME || repo.name;
 
-const stationLogger = createStationLogger({
-  enabled: process.env.STATION_LOGGING !== "false",
-  loadProperty: fetchPropertyFromHub,
-  saveProperty: updatePropertyOnHub,
-});
-
 async function reportToHub(
   state: AgentState,
   detail: string,
   agentId = AGENT_ID,
   nameOverride = agentName,
   parentAgentId: string | null = null,
-  spriteOverride?: string
+  spriteOverride?: string,
+  note?: string
 ) {
   const group = getGroup(state);
   try {
@@ -123,11 +117,20 @@ async function reportToHub(
         owner_id: OWNER_ID,
         owner_name: OWNER_NAME,
         parent_agent_id: parentAgentId,
+        ...(note && { note }),
       }),
     });
   } catch (err) {
     console.error("[agent-visualizer] Failed to report to hub:", err);
   }
+}
+
+/** Helper for authenticated hub requests. */
+function hubHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    ...(API_KEY && { Authorization: `Bearer ${API_KEY}` }),
+  };
 }
 
 // --- MCP Server ---
@@ -199,8 +202,7 @@ server.tool(
     ),
   },
   async ({ state, detail, note }) => {
-    await stationLogger.onStateUpdate(state, detail, note);
-    await reportToHub(state, detail);
+    await reportToHub(state, detail, AGENT_ID, agentName, null, undefined, note);
     return {
       content: [{ type: "text" as const, text: `State updated to "${state}" (${getGroup(state)}): ${detail}` }],
     };
@@ -242,60 +244,27 @@ server.tool(
   }
 );
 
-// --- Property Management (Hub-based) ---
+// --- Property reads (read-only, safe) ---
 
 interface Asset {
   id: string;
   name?: string;
-  sprite: { tileset?: string; tx?: number; ty?: number; file?: string; width?: number; height?: number };
   position: { x: number; y: number } | null;
-  content?: { type: string; data: string; source?: string; publishedAt?: string };
-  log?: string;
-  collision?: boolean;
   station?: string;
-  approach?: string;
+  content?: { type: string; data: string; source?: string; publishedAt?: string };
   trigger?: string;
   trigger_interval?: number;
-  trigger_payload?: unknown;
-  allow_payload?: boolean;
 }
 
-async function fetchPropertyFromHub(): Promise<{ version: number; assets: Asset[]; [key: string]: unknown }> {
-  try {
-    const response = await fetch(`${HUB_URL}/api/property`, {
-      headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
-    });
-    if (!response.ok) {
-      throw new Error(`Hub returned ${response.status}`);
-    }
-    return await response.json();
-  } catch (err) {
-    console.error("[agent-visualizer] Failed to fetch property from hub:", err);
-    // Return empty default property as fallback
-    return { version: 2, width: 24, height: 32, floor: [], assets: [] };
-  }
+async function fetchPropertyFromHub(): Promise<{ assets: Asset[]; [key: string]: unknown }> {
+  const response = await fetch(`${HUB_URL}/api/property`, {
+    headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
+  });
+  if (!response.ok) throw new Error(`Hub returned ${response.status}`);
+  return await response.json();
 }
 
-async function updatePropertyOnHub(property: object): Promise<void> {
-  try {
-    const response = await fetch(`${HUB_URL}/api/property`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(API_KEY && { Authorization: `Bearer ${API_KEY}` }),
-      },
-      body: JSON.stringify(property),
-    });
-    if (!response.ok) {
-      throw new Error(`Hub returned ${response.status}`);
-    }
-  } catch (err) {
-    console.error("[agent-visualizer] Failed to update property on hub:", err);
-    throw err;
-  }
-}
-
-// --- Asset Management Tools ---
+// --- Asset Management Tools (granular hub endpoints) ---
 
 server.tool(
   "sync_property",
@@ -351,25 +320,28 @@ server.tool(
   },
   async ({ name, tileset, tx, ty, x, y, station, approach, collision }) => {
     try {
-      const property = await fetchPropertyFromHub();
-      property.assets = property.assets || [];
+      const body: Record<string, unknown> = { name };
+      if (tileset !== undefined) body.tileset = tileset;
+      if (tx !== undefined) body.tx = tx;
+      if (ty !== undefined) body.ty = ty;
+      if (x !== undefined) body.x = x;
+      if (y !== undefined) body.y = y;
+      if (station) body.station = station;
+      if (approach) body.approach = approach;
+      if (collision !== undefined) body.collision = collision;
 
-      const id = `${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
-      const asset: Asset = {
-        id,
-        name,
-        sprite: { tileset: tileset || "interiors", tx: tx || 0, ty: ty || 0 },
-        position: x !== undefined && y !== undefined ? { x, y } : null,
-        collision: collision ?? false,
-        ...(station && { station }),
-        ...(approach && { approach }),
-      };
-
-      property.assets.push(asset);
-      await updatePropertyOnHub(property);
-
+      const res = await fetch(`${HUB_URL}/api/assets`, {
+        method: "POST",
+        headers: hubHeaders(),
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Failed to add asset: ${(err as { error: string }).error}` }] };
+      }
+      const { asset } = await res.json() as { asset: Asset };
       const posStr = asset.position ? `at (${asset.position.x}, ${asset.position.y})` : "in inventory";
-      return { content: [{ type: "text" as const, text: `Added asset "${name}" (${id}) ${posStr}` }] };
+      return { content: [{ type: "text" as const, text: `Added asset "${name}" (${asset.id}) ${posStr}` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Failed to add asset: ${err}` }] };
     }
@@ -384,14 +356,15 @@ server.tool(
   },
   async ({ asset_id }) => {
     try {
-      const property = await fetchPropertyFromHub();
-      const assets = property.assets || [];
-      const idx = assets.findIndex((a: Asset) => a.id === asset_id);
-      if (idx === -1) {
-        return { content: [{ type: "text" as const, text: `Asset ${asset_id} not found` }] };
+      const res = await fetch(`${HUB_URL}/api/assets/${encodeURIComponent(asset_id)}`, {
+        method: "DELETE",
+        headers: hubHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Failed to remove asset: ${(err as { error: string }).error}` }] };
       }
-      const removed = assets.splice(idx, 1)[0];
-      await updatePropertyOnHub(property);
+      const { removed } = await res.json() as { removed: Asset };
       return { content: [{ type: "text" as const, text: `Removed asset "${removed.name || removed.id}"` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Failed to remove asset: ${err}` }] };
@@ -409,14 +382,16 @@ server.tool(
   },
   async ({ asset_id, x, y }) => {
     try {
-      const property = await fetchPropertyFromHub();
-      const assets = property.assets || [];
-      const asset = assets.find((a: Asset) => a.id === asset_id);
-      if (!asset) {
-        return { content: [{ type: "text" as const, text: `Asset ${asset_id} not found` }] };
+      const res = await fetch(`${HUB_URL}/api/assets/${encodeURIComponent(asset_id)}`, {
+        method: "PATCH",
+        headers: hubHeaders(),
+        body: JSON.stringify({ position: { x, y } }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Failed to move asset: ${(err as { error: string }).error}` }] };
       }
-      asset.position = { x, y };
-      await updatePropertyOnHub(property);
+      const { asset } = await res.json() as { asset: Asset };
       return { content: [{ type: "text" as const, text: `Moved "${asset.name || asset.id}" to (${x}, ${y})` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Failed to move asset: ${err}` }] };
@@ -433,31 +408,32 @@ server.tool(
   },
   async ({ asset_id, file_path }) => {
     try {
-      const property = await fetchPropertyFromHub();
-      const assets = property.assets || [];
-      const asset = assets.find((a: Asset) => a.id === asset_id);
-      if (!asset) {
-        return { content: [{ type: "text" as const, text: `Asset ${asset_id} not found` }] };
+      // C3: Restrict file reads to the current working directory
+      const projectRoot = resolve(process.cwd());
+      const resolved = resolve(file_path);
+      if (!resolved.startsWith(projectRoot + sep) && resolved !== projectRoot) {
+        return { content: [{ type: "text" as const, text: "Error: path must be within project directory" }] };
       }
-      try {
-        // C3: Restrict file reads to the current working directory
-        const projectRoot = resolve(process.cwd());
-        const resolved = resolve(file_path);
-        if (!resolved.startsWith(projectRoot + sep) && resolved !== projectRoot) {
-          return { content: [{ type: "text" as const, text: "Error: path must be within project directory" }] };
-        }
 
-        const data = await readFile(file_path, "utf-8");
-        const ext = file_path.split(".").pop() || "txt";
-        const type = ext === "md" ? "markdown" : ext === "json" ? "json" : "text";
-        asset.content = { type, data, source: file_path, publishedAt: new Date().toISOString() };
-        await updatePropertyOnHub(property);
-        return { content: [{ type: "text" as const, text: `Attached ${file_path} to "${asset.name || asset.id}"` }] };
-      } catch (err) {
-        return { content: [{ type: "text" as const, text: `Failed to read file: ${err}` }] };
+      const data = await readFile(file_path, "utf-8");
+      const ext = file_path.split(".").pop() || "txt";
+      const type = ext === "md" ? "markdown" : ext === "json" ? "json" : "text";
+
+      const res = await fetch(`${HUB_URL}/api/assets/${encodeURIComponent(asset_id)}`, {
+        method: "PATCH",
+        headers: hubHeaders(),
+        body: JSON.stringify({
+          content: { type, data, source: file_path, publishedAt: new Date().toISOString() },
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Failed to attach: ${(err as { error: string }).error}` }] };
       }
+      const { asset } = await res.json() as { asset: Asset };
+      return { content: [{ type: "text" as const, text: `Attached ${file_path} to "${asset.name || asset.id}"` }] };
     } catch (err) {
-      return { content: [{ type: "text" as const, text: `Failed to fetch property: ${err}` }] };
+      return { content: [{ type: "text" as const, text: `Failed to attach content: ${err}` }] };
     }
   }
 );
@@ -590,7 +566,7 @@ const signalQueue: SignalMessage[] = [];
 const MAX_QUEUE_SIZE = 50;
 
 function connectSignalWs() {
-  const wsUrl = HUB_URL.replace(/^http/, "ws") + (API_KEY ? `?token=${API_KEY}` : "");
+  const wsUrl = HUB_URL.replace(/^http/, "ws");
   signalWs = new WebSocket(wsUrl);
   signalWs.on("message", (raw: Buffer) => {
     try {
