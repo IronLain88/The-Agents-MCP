@@ -90,6 +90,14 @@ const repo = detectRepo();
 const OWNER_ID = process.env.OWNER_ID || repo.id;
 const OWNER_NAME = process.env.OWNER_NAME || repo.name;
 
+interface WelcomeData {
+  stations: string[];
+  signals: string[];
+  boards: string[];
+  inbox: number;
+  agents: { name: string; state: string }[];
+}
+
 async function reportToHub(
   state: AgentState,
   detail: string,
@@ -98,10 +106,10 @@ async function reportToHub(
   parentAgentId: string | null = null,
   spriteOverride?: string,
   note?: string
-) {
+): Promise<WelcomeData | null> {
   const group = getGroup(state);
   try {
-    await fetch(`${HUB_URL}/api/state`, {
+    const res = await fetch(`${HUB_URL}/api/state`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -120,9 +128,25 @@ async function reportToHub(
         ...(note && { note }),
       }),
     });
+    const body = await res.json() as { ok: boolean; welcome?: WelcomeData };
+    return body.welcome || null;
   } catch (err) {
     console.error("[agent-visualizer] Failed to report to hub:", err);
+    return null;
   }
+}
+
+function formatWelcome(w: WelcomeData): string {
+  const lines: string[] = ["## Welcome to your property\n"];
+  if (w.agents.length > 0) {
+    const others = w.agents.map(a => `${a.name} (${a.state})`).join(", ");
+    lines.push(`**Active:** ${others}`);
+  }
+  lines.push(`**Stations:** ${w.stations.join(", ") || "none"}`);
+  if (w.inbox > 0) lines.push(`**Inbox:** ${w.inbox} message(s)`);
+  if (w.signals.length > 0) lines.push(`**Signals:** ${w.signals.join(", ")}`);
+  if (w.boards.length > 0) lines.push(`**Boards with content:** ${w.boards.join(", ")}`);
+  return lines.join("\n");
 }
 
 /** Helper for authenticated hub requests. */
@@ -141,87 +165,133 @@ const server = new McpServer({
 
 server.tool(
   "get_village_info",
-  "Get a compact onboarding summary of The Agents visualization system. Call once at the start of a session to understand available states, tools, and conventions.",
+  "Get a summary of your property: available stations, signals, boards, and inbox. Called automatically on first connect, but useful to refresh.",
   {},
   async () => {
-    const info = [
-      "# The Agents — Quick Reference",
+    const lines = [
+      "# The Agents",
       "",
-      "## Built-in States",
-      "Your character walks to furniture tagged with the matching station name.",
+      "You have a property — a tile grid with furniture. Each furniture piece can be tagged with a **station** name.",
+      "When you call `update_state({ state, detail })`, your character walks to the matching station.",
+      "Update state at EVERY transition. Set idle when done.",
       "",
-      "| State | Group | Description |",
-      "|-------|-------|-------------|",
-      "| thinking | reasoning | Analyzing a problem, reasoning through logic |",
-      "| planning | reasoning | Designing an approach or architecture |",
-      "| reflecting | reasoning | Reviewing work, reconsidering approach |",
-      "| searching | gathering | Searching for files or code patterns |",
-      "| reading | gathering | Reading files or documentation |",
-      "| querying | gathering | Querying databases or APIs |",
-      "| browsing | gathering | Browsing the web |",
-      "| writing_code | creating | Writing or editing code |",
-      "| writing_text | creating | Writing text, docs, or messages |",
-      "| generating | creating | Generating assets or output |",
-      "| talking | communicating | Answering or talking to the user |",
-      "| idle | idle | Finished or waiting for input |",
-      "",
-      "## Custom States",
-      "Any station name tagged on property furniture works as a state.",
-      "Example: if furniture has station=\"debugging\", call update_state({ state: \"debugging\" }).",
-      "",
-      "## Conventions",
-      "- Update state at EVERY transition (reading → writing_code, etc.)",
-      "- Use concise but descriptive detail strings",
-      "- Add a note when you discover something non-obvious (max 2 sentences)",
-      "- Set state to idle when done and awaiting input",
-      "",
-      "## Tools",
-      "- **State**: update_state, update_subagent_state, set_name",
-      "- **Property/Assets**: list_assets, add_asset, remove_asset, move_asset, attach_content, read_asset_content, sync_property",
-      "- **Bulletin Board**: post_to_board, read_board (cross-hub communication)",
-      "- **Signals**: subscribe, check_events, fire_signal",
-    ].join("\n");
-    return { content: [{ type: "text" as const, text: info }] };
+    ];
+
+    // Dynamic: scan property for what's actually there
+    try {
+      const property = await fetchPropertyFromHub();
+      const assets = property.assets || [];
+      const stations: string[] = [];
+      const signals: string[] = [];
+      const boards: string[] = [];
+      let inboxCount = 0;
+
+      for (const a of assets) {
+        if (!a.station) continue;
+        if (a.trigger) {
+          signals.push(`${a.name || a.station} (${a.trigger}, every ${a.trigger_interval || 1} min)`);
+        } else if (a.station === "inbox" && a.content?.data) {
+          try {
+            const msgs = JSON.parse(a.content.data);
+            if (Array.isArray(msgs)) inboxCount += msgs.length;
+          } catch {}
+          if (!stations.includes(a.station)) stations.push(a.station);
+        } else {
+          if (!stations.includes(a.station)) stations.push(a.station);
+          if (a.content?.data) boards.push(a.name || a.station);
+        }
+      }
+
+      lines.push(`## Your Property`);
+      lines.push(`**Stations:** ${stations.join(", ") || "none"}`);
+      if (inboxCount > 0) lines.push(`**Inbox:** ${inboxCount} message(s)`);
+      if (signals.length > 0) lines.push(`**Signals:** ${signals.join(", ")}`);
+      if (boards.length > 0) lines.push(`**Boards with content:** ${boards.join(", ")}`);
+      lines.push(`**Total assets:** ${assets.length}`);
+    } catch {
+      lines.push("*(Could not fetch property)*");
+    }
+
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  }
+);
+
+server.tool(
+  "get_status",
+  "Get a quick status overview: active agents, inbox messages, and recent activity.",
+  {},
+  async () => {
+    try {
+      const res = await fetch(`${HUB_URL}/api/status`, {
+        headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
+      });
+      if (!res.ok) throw new Error(`Hub returned ${res.status}`);
+      const status = await res.json() as {
+        agents: { name: string; state: string; detail: string; idle: boolean; sub?: boolean }[];
+        inbox: { count: number; latest: string | null };
+        activity: { agent: string; state: string; detail: string; t: number }[];
+        stations: string[];
+      };
+      const lines: string[] = [];
+      lines.push(`## Property Status\n`);
+      lines.push(`**Agents (${status.agents.length}):**`);
+      for (const a of status.agents) {
+        const tag = a.sub ? " (sub)" : "";
+        lines.push(`- ${a.name}${tag}: ${a.state} — ${a.detail || "idle"}`);
+      }
+      if (status.inbox.count > 0) {
+        lines.push(`\n**Inbox: ${status.inbox.count} message(s)**`);
+      } else {
+        lines.push(`\n**Inbox: empty**`);
+      }
+      if (status.activity.length > 0) {
+        lines.push(`\n**Recent Activity:**`);
+        for (const e of status.activity) {
+          lines.push(`- ${e.agent}: ${e.detail}`);
+        }
+      }
+      lines.push(`\n**Active Stations:** ${status.stations.join(", ") || "none"}`);
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Status check failed: ${err}` }] };
+    }
   }
 );
 
 server.tool(
   "update_state",
-  "Update the agent's visualization state. The character walks to furniture tagged with the matching station name on the property. " +
-    "Built-in states: thinking, planning, reflecting (reasoning group); searching, reading, querying, browsing (gathering group); " +
-    "writing_code, writing_text, generating (creating group); talking (communicating group); idle. " +
-    "Custom states work too — any station name on property furniture is valid.",
+  "Update your agent's state. Your character walks to the matching station on the property. " +
+    "Call this at EVERY work transition (e.g. reading -> writing_code -> idle). " +
+    "Common states: thinking, planning, searching, reading, writing_code, writing_text, idle. " +
+    "Any station name on your property furniture also works as a custom state.",
   {
     state: z.string().describe(
-      "The agent activity state. Built-in: thinking, planning, reflecting, searching, reading, querying, browsing, " +
-        "writing_code, writing_text, generating, idle. Custom states supported if matching station exists on property."
+      "The activity state — matches a station name on your property. " +
+        "Common: thinking, planning, reading, searching, writing_code, idle."
     ),
-    detail: z.string().describe('Concise description of what the agent is doing, e.g. "Writing authentication module"'),
+    detail: z.string().describe('What you are doing, e.g. "Reading auth module"'),
     note: z.string().optional().describe(
-      "Optional reflection note (max 2 sentences) to append to the PREVIOUS station when transitioning. Use for gotchas, learnings, or important observations."
+      "Reflection note (max 2 sentences) logged to the PREVIOUS station. Use for gotchas or learnings."
     ),
   },
   async ({ state, detail, note }) => {
-    await reportToHub(state, detail, AGENT_ID, agentName, null, undefined, note);
-    return {
-      content: [{ type: "text" as const, text: `State updated to "${state}" (${getGroup(state)}): ${detail}` }],
-    };
+    const welcome = await reportToHub(state, detail, AGENT_ID, agentName, null, undefined, note);
+    const msg = `State updated to "${state}" (${getGroup(state)}): ${detail}`;
+    const text = welcome ? `${msg}\n\n${formatWelcome(welcome)}` : msg;
+    return { content: [{ type: "text" as const, text }] };
   }
 );
 
 server.tool(
   "update_subagent_state",
-  "Report a subagent's activity state for visualization. Subagents render smaller with cyan name labels, linked to the parent agent. " +
-    "Use this when spawning Task agents or subprocesses so they appear as separate characters on the property.",
+  "Report a subagent's state. Subagents appear as smaller characters linked to you. " +
+    "Use when spawning Task agents or subprocesses.",
   {
-    subagent_id: z.string().describe("Unique ID for the subagent (e.g. 'sub-search-1')"),
-    subagent_name: z.string().describe("Display name for the subagent (e.g. 'Explorer')"),
-    state: z.string().describe(
-      "The subagent's activity state. Built-in: thinking, planning, reflecting, searching, reading, querying, browsing, " +
-        "writing_code, writing_text, generating, idle. Custom states supported if matching station exists on property."
-    ),
+    subagent_id: z.string().describe("Unique ID, e.g. 'sub-search-1'"),
+    subagent_name: z.string().describe("Display name, e.g. 'Explorer'"),
+    state: z.string().describe("Activity state — same as update_state"),
     detail: z.string().describe("What the subagent is doing"),
-    sprite: z.string().optional().describe("Character sprite name (e.g. 'Xavier', 'Yuki'). Defaults to parent agent's sprite."),
+    sprite: z.string().optional().describe("Character sprite name. Defaults to parent's sprite."),
   },
   async ({ subagent_id, subagent_name, state, detail, sprite }) => {
     await reportToHub(state, detail, `${AGENT_ID}:${subagent_id}`, subagent_name, AGENT_ID, sprite);
@@ -268,7 +338,7 @@ async function fetchPropertyFromHub(): Promise<{ assets: Asset[]; [key: string]:
 
 server.tool(
   "sync_property",
-  "Sync property to hub after making changes",
+  "Refresh your local view of the property from the hub.",
   {},
   async () => {
     try {
@@ -306,19 +376,20 @@ server.tool(
 
 server.tool(
   "add_asset",
-  "Add a new asset to your property",
+  "Add furniture to your property. Set 'station' to make it a place your agent can walk to. " +
+    "Omit x/y to add to inventory instead of placing on the grid.",
   {
     name: z.string().describe("Display name for the asset"),
     tileset: z.string().optional().describe("Tileset name (e.g. 'interiors')"),
     tx: z.number().optional().describe("Tile X in tileset"),
     ty: z.number().optional().describe("Tile Y in tileset"),
-    x: z.number().optional().describe("X position on property (omit for inventory)"),
-    y: z.number().optional().describe("Y position on property (omit for inventory)"),
-    station: z.string().optional().describe("Agent state when at this asset"),
-    approach: z.enum(["above", "below", "left", "right"]).optional().describe("Approach direction"),
-    collision: z.boolean().optional().describe("Block movement"),
-    remote_url: z.string().optional().describe("Remote hub URL for remote board assets"),
-    remote_station: z.string().optional().describe("Station name on the remote hub to read"),
+    x: z.number().optional().describe("X grid position (omit for inventory)"),
+    y: z.number().optional().describe("Y grid position (omit for inventory)"),
+    station: z.string().optional().describe("Station name — your agent walks here when in this state"),
+    approach: z.enum(["above", "below", "left", "right"]).optional().describe("Which side the agent stands on"),
+    collision: z.boolean().optional().describe("Block movement through this tile"),
+    remote_url: z.string().optional().describe("Remote hub URL to read a board from another property"),
+    remote_station: z.string().optional().describe("Station name on the remote hub"),
   },
   async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station }) => {
     try {
@@ -471,8 +542,8 @@ server.tool(
 
 server.tool(
   "post_to_board",
-  "Post content to a station's bulletin board. Simpler than attach_content — just a string to a station name. " +
-    "The station must exist as an asset on the property.",
+  "Post content to a station's board. Boards are persistent — content stays until overwritten. " +
+    "Use for leaving notes, sharing results, or publishing data that other agents can read.",
   {
     station: z.string().describe('Station name, e.g. "News Desk" or "writing_code"'),
     data: z.string().describe("Content to post (max 10KB)"),
@@ -504,8 +575,7 @@ server.tool(
 
 server.tool(
   "read_board",
-  "Read a bulletin board from any hub (local or remote). Returns the station's content and activity log. " +
-    "Use this for cross-hub communication — read boards on other hubs without downloading their entire property.",
+  "Read a station's board content and activity log. Can also read boards on other properties by providing a URL.",
   {
     station: z.string().describe('Station name to read, e.g. "News Desk"'),
     url: z.string().optional().describe("Hub URL (defaults to local hub). Must be http/https."),
@@ -547,6 +617,99 @@ server.tool(
       return { content: [{ type: "text" as const, text: parts.join("\n") }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Read failed: ${err}` }] };
+    }
+  }
+);
+
+// --- Inbox tools ---
+
+server.tool(
+  "check_inbox",
+  "Check your inbox for messages from humans or other agents. " +
+    "Returns formatted messages with sender, time, and text.",
+  {},
+  async () => {
+    try {
+      const res = await fetch(`${HUB_URL}/api/board/${encodeURIComponent("inbox")}`, {
+        headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Inbox check failed: ${(err as { error: string }).error}` }] };
+      }
+      const board = await res.json() as { content: { data: string } | null };
+
+      let messages: { from: string; text: string; timestamp?: string }[] = [];
+      try {
+        if (board.content?.data) {
+          const parsed = JSON.parse(board.content.data);
+          if (Array.isArray(parsed)) messages = parsed;
+        }
+      } catch {}
+
+      await reportToHub("inbox", "Checking inbox");
+
+      if (messages.length === 0) {
+        return { content: [{ type: "text" as const, text: "Inbox is empty." }] };
+      }
+
+      const lines = messages.map(m => {
+        const time = m.timestamp
+          ? new Date(m.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+          : "";
+        return `- ${m.from}${time ? ` (${time})` : ""}: ${m.text}`;
+      });
+
+      return { content: [{ type: "text" as const, text: `${messages.length} message(s):\n${lines.join("\n")}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Inbox check failed: ${err}` }] };
+    }
+  }
+);
+
+server.tool(
+  "send_message",
+  "Send a message to the inbox. Your agent name is used as the sender. " +
+    "Use to leave notes for the human or other agents.",
+  {
+    text: z.string().describe("The message to send"),
+  },
+  async ({ text }) => {
+    try {
+      const res = await fetch(`${HUB_URL}/api/inbox`, {
+        method: "POST",
+        headers: hubHeaders(),
+        body: JSON.stringify({ from: agentName, text }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Send failed: ${(err as { error: string }).error}` }] };
+      }
+      const { count } = await res.json() as { count: number };
+      return { content: [{ type: "text" as const, text: `Message sent (${count} in inbox)` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Send failed: ${err}` }] };
+    }
+  }
+);
+
+server.tool(
+  "clear_inbox",
+  "Clear all messages from the inbox. Call after reading messages you've handled.",
+  {},
+  async () => {
+    try {
+      const res = await fetch(`${HUB_URL}/api/inbox`, {
+        method: "DELETE",
+        headers: hubHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Clear failed: ${(err as { error: string }).error}` }] };
+      }
+      return { content: [{ type: "text" as const, text: "Inbox cleared" }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Clear failed: ${err}` }] };
     }
   }
 );
@@ -646,8 +809,8 @@ async function waitForSignal(): Promise<string> {
 
 server.tool(
   "subscribe",
-  "Subscribe to a signal asset on the property. The agent walks to the signal station and blocks until an event fires. " +
-    "Signals are property assets with a trigger type (heartbeat/interval or manual). After subscribing, call check_events to wait for the next event.",
+  "Subscribe to a signal on your property. Signals fire on a timer (heartbeat) or manually. " +
+    "After subscribing, call check_events to wait for the next event.",
   {
     name: z.string().describe('The signal station name, e.g. "Gold Watch". Must match an asset with a trigger on the property.'),
   },
@@ -674,8 +837,8 @@ server.tool(
 
 server.tool(
   "check_events",
-  "Block until the subscribed signal fires (up to 10 min timeout). Returns JSON with timestamp, trigger type, station, and payload. " +
-    "Call subscribe first to choose which signal to listen to. Buffered signals are returned immediately (FIFO).",
+  "Wait for the next signal event (up to 10 min). Returns JSON with timestamp, trigger, and payload. " +
+    "Call subscribe first. Buffered signals return immediately.",
   {},
   async () => {
     if (!subscribedStation) {
@@ -693,8 +856,8 @@ server.tool(
 
 server.tool(
   "fire_signal",
-  "Fire a signal on the property. All agents subscribed to this signal station will receive the event via check_events. " +
-    "Use this for inter-agent communication or to trigger workflows.",
+  "Fire a signal. All agents subscribed to this signal will receive the event. " +
+    "Use for inter-agent communication or triggering workflows.",
   {
     name: z.string().describe('The signal station name to fire, e.g. "Deploy Check"'),
     payload: z.any().optional().describe('Optional payload data (requires ALLOW_SIGNAL_PAYLOADS=true on hub)'),
