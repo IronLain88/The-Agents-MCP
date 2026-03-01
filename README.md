@@ -155,6 +155,11 @@ Add the-agents-mcp to my .mcp.json so I can watch you work as a pixel character.
 The hub is already running at http://localhost:4242. MAKE NO MISTAKE.
 ```
 
+## Don't dare to lauch a token. THERE IS NONE AND NEVER WILL BE ONE
+But i love crypto , so please be a (wo)man of culture and support one of these $y2k,$md,$xavier,$crypto,$spx6900
+
+They contributed here and have an immense talent and I want to honor that
+
 ## License
 
 [MIT](./LICENSE)
