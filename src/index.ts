@@ -627,10 +627,13 @@ server.tool(
   "check_inbox",
   "Check your inbox for messages from humans or other agents. " +
     "Returns formatted messages with sender, time, and text.",
-  {},
-  async () => {
+  {
+    name: z.string().optional().describe('Inbox name (default: "inbox"). Use for named inboxes like "inbox-bugs".'),
+  },
+  async ({ name }) => {
+    const inbox = name || "inbox";
     try {
-      const res = await fetch(`${HUB_URL}/api/board/${encodeURIComponent("inbox")}`, {
+      const res = await fetch(`${HUB_URL}/api/board/${encodeURIComponent(inbox)}`, {
         headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
       });
       if (!res.ok) {
@@ -647,10 +650,10 @@ server.tool(
         }
       } catch {}
 
-      await reportToHub("inbox", "Checking inbox");
+      await reportToHub(inbox, "Checking inbox");
 
       if (messages.length === 0) {
-        return { content: [{ type: "text" as const, text: "Inbox is empty." }] };
+        return { content: [{ type: "text" as const, text: `${inbox} is empty.` }] };
       }
 
       const lines = messages.map(m => {
@@ -673,10 +676,12 @@ server.tool(
     "Use to leave notes for the human or other agents.",
   {
     text: z.string().describe("The message to send"),
+    inbox: z.string().optional().describe('Target inbox name (default: "inbox"). Use for named inboxes like "inbox-bugs".'),
   },
-  async ({ text }) => {
+  async ({ text, inbox }) => {
+    const target = inbox || "inbox";
     try {
-      const res = await fetch(`${HUB_URL}/api/inbox`, {
+      const res = await fetch(`${HUB_URL}/api/inbox/${encodeURIComponent(target)}`, {
         method: "POST",
         headers: hubHeaders(),
         body: JSON.stringify({ from: agentName, text }),
@@ -686,7 +691,7 @@ server.tool(
         return { content: [{ type: "text" as const, text: `Send failed: ${(err as { error: string }).error}` }] };
       }
       const { count } = await res.json() as { count: number };
-      return { content: [{ type: "text" as const, text: `Message sent (${count} in inbox)` }] };
+      return { content: [{ type: "text" as const, text: `Message sent to ${target} (${count} total)` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Send failed: ${err}` }] };
     }
@@ -696,10 +701,13 @@ server.tool(
 server.tool(
   "clear_inbox",
   "Clear all messages from the inbox. Call after reading messages you've handled.",
-  {},
-  async () => {
+  {
+    name: z.string().optional().describe('Inbox name to clear (default: "inbox").'),
+  },
+  async ({ name }) => {
+    const target = name || "inbox";
     try {
-      const res = await fetch(`${HUB_URL}/api/inbox`, {
+      const res = await fetch(`${HUB_URL}/api/inbox/${encodeURIComponent(target)}`, {
         method: "DELETE",
         headers: hubHeaders(),
       });
@@ -707,7 +715,7 @@ server.tool(
         const err = await res.json().catch(() => ({ error: res.statusText }));
         return { content: [{ type: "text" as const, text: `Clear failed: ${(err as { error: string }).error}` }] };
       }
-      return { content: [{ type: "text" as const, text: "Inbox cleared" }] };
+      return { content: [{ type: "text" as const, text: `${target} cleared` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Clear failed: ${err}` }] };
     }
