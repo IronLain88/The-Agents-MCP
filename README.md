@@ -1,18 +1,20 @@
 # The Agents — MCP Server
 
+*The middleman between your AI doing all the work and you watching it happen in pixel art*
+
 [![npm](https://img.shields.io/npm/v/the-agents-mcp)](https://www.npmjs.com/package/the-agents-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-MCP server that connects AI agents to [The Agents Hub](https://github.com/IronLain88/The-Agents-Hub). Your agent appears as a pixel character walking between stations on a tile-based property.
+MCP server that connects AI agents to [The Agents Hub](https://github.com/IronLain88/The-Agents-Hub). Your agent appears as a pixel character walking between stations on a tile-based property. Finally, proof that *someone* is working on your project.
 
-Works with **Claude Code**, **Cursor**, and any MCP-compatible client.
+Works with **Claude Code**, **Cursor**, and any MCP-compatible client. Defaults to port 4242 because we would never disturb your vibes by stealing port 3000.
 
 ## Quick Start
 
 ### 1. Start the hub
 
 ```bash
-docker run -p 3000:3000 theagents/hub
+docker run -p 4242:4242 zer0liquid/the-agents-hub:latest
 ```
 
 Or [run from source](https://github.com/IronLain88/The-Agents-Hub).
@@ -28,7 +30,7 @@ Add to your project's `.mcp.json`:
       "command": "npx",
       "args": ["the-agents-mcp"],
       "env": {
-        "HUB_URL": "http://localhost:3000",
+        "HUB_URL": "http://localhost:4242",
         "AGENT_NAME": "Claude",
         "AGENT_SPRITE": "Yuki"
       }
@@ -39,13 +41,13 @@ Add to your project's `.mcp.json`:
 
 ### 3. Open the viewer
 
-Go to **http://localhost:3000/viewer/** and watch your agent work.
+Go to **http://localhost:4242/viewer/** and watch your agent work.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HUB_URL` | `http://localhost:3000` | Hub server URL |
+| `HUB_URL` | `http://localhost:4242` | Hub server URL |
 | `API_KEY` | *(none)* | Hub API key for authenticated endpoints |
 | `AGENT_ID` | auto-generated | Unique agent identifier |
 | `AGENT_NAME` | `Agent` | Display name on the property |
@@ -113,7 +115,7 @@ Your Agent ──► MCP Server ──► Hub (POST /api/state)
                               Character walks to station
 ```
 
-The agent calls `update_state({ state: "writing_code", detail: "Fixing auth bug" })`. The MCP server posts to the hub. The hub broadcasts to all connected viewers. Your character walks to the desk.
+The agent calls `update_state({ state: "writing_code", detail: "Fixing auth bug" })`. The MCP server posts to the hub. The hub broadcasts to all connected viewers. Your character walks to the desk. You walk to the fridge.
 
 ## Multi-Agent
 
@@ -126,7 +128,7 @@ Multiple agents can connect simultaneously — each gets their own character. Se
       "command": "npx",
       "args": ["the-agents-mcp"],
       "env": {
-        "HUB_URL": "http://localhost:3000",
+        "HUB_URL": "http://localhost:4242",
         "AGENT_NAME": "Claude",
         "AGENT_SPRITE": "Yuki"
       }
@@ -135,13 +137,22 @@ Multiple agents can connect simultaneously — each gets their own character. Se
       "command": "npx",
       "args": ["the-agents-mcp"],
       "env": {
-        "HUB_URL": "http://localhost:3000",
+        "HUB_URL": "http://localhost:4242",
         "AGENT_NAME": "Copilot",
         "AGENT_SPRITE": "Aeon"
       }
     }
   }
 }
+```
+
+## I Know You Didn't Read Any of That
+
+Just paste this into Claude:
+
+```
+Add the-agents-mcp to my .mcp.json so I can watch you work as a pixel character.
+The hub is already running at http://localhost:4242. MAKE NO MISTAKE.
 ```
 
 ## License

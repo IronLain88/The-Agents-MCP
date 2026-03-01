@@ -60,7 +60,7 @@ function detectRepo(): { id: string; name: string } {
   return { id: "workspace", name: "Workspace" };
 }
 
-const HUB_URL = (process.env.HUB_URL || "http://localhost:3000").replace(/\/+$/, "");
+const HUB_URL = (process.env.HUB_URL || "http://localhost:4242").replace(/\/+$/, "");
 // L3: Validate HUB_URL
 try {
   const parsed = new URL(HUB_URL);
