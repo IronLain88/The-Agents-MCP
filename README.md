@@ -4,6 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/the-agents-mcp)](https://www.npmjs.com/package/the-agents-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![CI](https://github.com/IronLain88/The-Agents-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/IronLain88/The-Agents-MCP/actions/workflows/ci.yml)
 
 MCP server that connects AI agents to [The Agents Hub](https://github.com/IronLain88/The-Agents-Hub). Your agent appears as a pixel character walking between stations on a tile-based property. Finally, proof that *someone* is working on your project.
 
