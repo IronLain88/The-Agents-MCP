@@ -211,7 +211,10 @@ server.tool(
       lines.push(`## Your Property`);
       lines.push(`**Stations:** ${stations.join(", ") || "none"}`);
       if (inboxCount > 0) lines.push(`**Inbox:** ${inboxCount} message(s)`);
-      if (tasks.length > 0) lines.push(`**Tasks:** ${tasks.join(", ")}`);
+      if (tasks.length > 0) {
+        lines.push(`**Tasks:** ${tasks.join(", ")}`);
+        lines.push(`*To work on a task: subscribe({name}) → check_events() → do the work → answer_task({station, result})*`);
+      }
       if (signals.length > 0) lines.push(`**Signals:** ${signals.join(", ")}`);
       if (boards.length > 0) lines.push(`**Boards with content:** ${boards.join(", ")}`);
       lines.push(`**Total assets:** ${assets.length}`);
@@ -817,8 +820,8 @@ async function waitForSignal(): Promise<string> {
 
 server.tool(
   "subscribe",
-  "Subscribe to a signal on your property. Signals fire on a timer (heartbeat) or manually. " +
-    "After subscribing, call check_events to wait for the next event.",
+  "Subscribe to a signal or task station. For tasks: subscribe → check_events (returns instructions) → do work → answer_task. " +
+    "Signals fire on a timer (heartbeat) or manually.",
   {
     name: z.string().describe('The signal station name, e.g. "Gold Watch". Must match an asset with a trigger on the property.'),
   },
@@ -843,8 +846,8 @@ server.tool(
 
 server.tool(
   "check_events",
-  "Wait for the next signal event (up to 10 min). Returns JSON with timestamp, trigger, and payload. " +
-    "Call subscribe first. Buffered signals return immediately.",
+  "Wait for the next event on your subscribed station (up to 10 min). For tasks, the event payload contains " +
+    "{station, instructions, prompt} telling you what to do. Call subscribe first.",
   {},
   async () => {
     if (!subscribedStation) {
@@ -969,7 +972,7 @@ server.tool(
 server.tool(
   "read_task",
   "Read a task station's instructions and current status. " +
-    "Use this to see what the task requires and whether it's idle, pending, or done.",
+    "Use get_village_info to discover available tasks first.",
   {
     station: z.string().describe('The task station name, e.g. "Reddit Spy"'),
   },
@@ -1013,8 +1016,8 @@ server.tool(
 
 server.tool(
   "answer_task",
-  "Post an HTML result to a pending task. " +
-    "The result is rendered as rich HTML in the viewer. Use headings, lists, links, etc.",
+  "Post your result (HTML) to a task station after completing the work from check_events. " +
+    "Rendered as rich HTML in the viewer. Use headings, lists, links, etc.",
   {
     station: z.string().describe('The task station name, e.g. "Reddit y2k"'),
     result: z.string().describe('HTML result to display, e.g. "<h2>Results</h2><ul><li>...</li></ul>"'),
