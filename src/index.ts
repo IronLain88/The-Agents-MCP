@@ -855,9 +855,9 @@ server.tool(
     if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
     try {
       const result = await waitForSignal();
-      return { content: [{ type: "text" as const, text: result }] };
+      return { content: [{ type: "text" as const, text: result + "\n\nRemember to call update_state for your next activity." }] };
     } catch {
-      return { content: [{ type: "text" as const, text: "No events (timeout)" }] };
+      return { content: [{ type: "text" as const, text: "No events (timeout). Remember to call update_state for your next activity." }] };
     }
   }
 );
