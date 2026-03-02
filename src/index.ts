@@ -186,8 +186,14 @@ server.tool(
       const boards: string[] = [];
       let inboxCount = 0;
 
+      const tasks: string[] = [];
+
       for (const a of assets) {
         if (!a.station) continue;
+        if ((a as any).task) {
+          tasks.push(`${a.station} — ${(a as any).instructions || "(no instructions)"}`);
+          continue;
+        }
         if (a.trigger) {
           signals.push(`${a.name || a.station} (${a.trigger}, every ${a.trigger_interval || 1} min)`);
         } else if (a.station === "inbox" && a.content?.data) {
@@ -205,6 +211,7 @@ server.tool(
       lines.push(`## Your Property`);
       lines.push(`**Stations:** ${stations.join(", ") || "none"}`);
       if (inboxCount > 0) lines.push(`**Inbox:** ${inboxCount} message(s)`);
+      if (tasks.length > 0) lines.push(`**Tasks:** ${tasks.join(", ")}`);
       if (signals.length > 0) lines.push(`**Signals:** ${signals.join(", ")}`);
       if (boards.length > 0) lines.push(`**Boards with content:** ${boards.join(", ")}`);
       lines.push(`**Total assets:** ${assets.length}`);
@@ -787,32 +794,25 @@ function formatSignalEvent(msg: SignalMessage): string {
 }
 
 async function waitForSignal(): Promise<string> {
-  const keepAlive = setInterval(() => {
-    reportToHub(subscribedStation!, "Listening for signal");
-  }, 30_000);
-  try {
-    // Check queue first - return immediately if signals are buffered
-    if (signalQueue.length > 0) {
-      const msg = signalQueue.shift()!; // Get oldest signal (FIFO)
-      return formatSignalEvent(msg);
-    }
-
-    // No queued signals - wait for next one
-    const msg = await new Promise<SignalMessage>((resolve, reject) => {
-      pendingResolve = resolve;
-      // Safety timeout: 10 minutes
-      setTimeout(() => {
-        if (pendingResolve === resolve) {
-          pendingResolve = null;
-          reject(new Error("timeout"));
-        }
-      }, 10 * 60_000);
-    });
-
+  // Check queue first - return immediately if signals are buffered
+  if (signalQueue.length > 0) {
+    const msg = signalQueue.shift()!; // Get oldest signal (FIFO)
     return formatSignalEvent(msg);
-  } finally {
-    clearInterval(keepAlive);
   }
+
+  // No queued signals - wait for next one
+  const msg = await new Promise<SignalMessage>((resolve, reject) => {
+    pendingResolve = resolve;
+    // Safety timeout: 10 minutes
+    setTimeout(() => {
+      if (pendingResolve === resolve) {
+        pendingResolve = null;
+        reject(new Error("timeout"));
+      }
+    }, 10 * 60_000);
+  });
+
+  return formatSignalEvent(msg);
 }
 
 server.tool(
@@ -823,7 +823,6 @@ server.tool(
     name: z.string().describe('The signal station name, e.g. "Gold Watch". Must match an asset with a trigger on the property.'),
   },
   async ({ name }) => {
-    // Fetch property from hub to find the signal asset
     try {
       const property = await fetchPropertyFromHub();
       const asset = (property.assets || []).find(
@@ -834,7 +833,6 @@ server.tool(
       }
       subscribedStation = name;
       if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
-      await reportToHub(name, `Listening for ${asset.trigger} signal`);
       const interval = asset.trigger_interval || 1;
       return { content: [{ type: "text" as const, text: `Subscribed to "${name}" (${asset.trigger} every ${interval} min)` }] };
     } catch (err) {
@@ -886,6 +884,155 @@ server.tool(
       return { content: [{ type: "text" as const, text: `Fired signal "${name}"` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Fire failed: ${err}` }] };
+    }
+  }
+);
+
+// --- Reception tools ---
+
+server.tool(
+  "read_reception",
+  "Read a reception station's private instructions and current Q&A state. " +
+    "Use this after walking to a reception station to get your instructions and check for pending questions.",
+  {
+    station: z.string().describe('The reception station name, e.g. "Help Desk"'),
+  },
+  async ({ station }) => {
+    try {
+      const property = await fetchPropertyFromHub();
+      const asset = (property.assets || []).find(
+        (a: Asset) => a.station === station && (a as any).reception
+      );
+      if (!asset) {
+        return { content: [{ type: "text" as const, text: `No reception station "${station}" found` }] };
+      }
+
+      const parts: string[] = [`# Reception: ${station}\n`];
+
+      // Instructions (private to agent)
+      const instructions = (asset as any).instructions;
+      if (instructions) {
+        parts.push(`## Instructions\n${instructions}\n`);
+      }
+
+      // Current Q&A state
+      let state = { status: "idle", question: null as string | null, answer: null as string | null };
+      try {
+        if (asset.content?.data) state = JSON.parse(asset.content.data);
+      } catch {}
+
+      parts.push(`## Status: ${state.status}`);
+      if (state.status === "pending" && state.question) {
+        parts.push(`\n## Question\n${state.question}`);
+      } else if (state.status === "answered") {
+        parts.push(`\nQuestion: ${state.question}`);
+        parts.push(`Answer already posted.`);
+      } else {
+        parts.push(`\nNo pending questions. Subscribe and wait for visitors.`);
+      }
+
+      return { content: [{ type: "text" as const, text: parts.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Failed: ${err}` }] };
+    }
+  }
+);
+
+server.tool(
+  "answer_reception",
+  "Post an HTML answer to a pending reception question. " +
+    "The answer is rendered as rich HTML in the viewer. Use headings, lists, code blocks, etc.",
+  {
+    station: z.string().describe('The reception station name, e.g. "Help Desk"'),
+    answer: z.string().describe('HTML answer to display to the visitor, e.g. "<h2>Answer</h2><p>Here is the info...</p>"'),
+  },
+  async ({ station, answer }) => {
+    try {
+      const res = await fetch(`${HUB_URL}/api/reception/${encodeURIComponent(station)}/answer`, {
+        method: "POST",
+        headers: hubHeaders(),
+        body: JSON.stringify({ answer }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Answer failed: ${(err as { error: string }).error}` }] };
+      }
+      return { content: [{ type: "text" as const, text: `Answer posted to "${station}"` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Answer failed: ${err}` }] };
+    }
+  }
+);
+
+// --- Task tools ---
+
+server.tool(
+  "read_task",
+  "Read a task station's instructions and current status. " +
+    "Use this to see what the task requires and whether it's idle, pending, or done.",
+  {
+    station: z.string().describe('The task station name, e.g. "Reddit Spy"'),
+  },
+  async ({ station }) => {
+    try {
+      const property = await fetchPropertyFromHub();
+      const asset = (property.assets || []).find(
+        (a: any) => a.station === station && a.task
+      );
+      if (!asset) {
+        return { content: [{ type: "text" as const, text: `No task station "${station}" found` }] };
+      }
+
+      const parts: string[] = [`# Task: ${station}\n`];
+
+      const instructions = (asset as any).instructions;
+      if (instructions) {
+        parts.push(`## Instructions\n${instructions}\n`);
+      }
+
+      let state = { status: "idle", result: null as string | null };
+      try {
+        if (asset.content?.data) state = JSON.parse(asset.content.data);
+      } catch {}
+
+      parts.push(`## Status: ${state.status}`);
+      if (state.status === "pending") {
+        parts.push("\nTask is running. Wait for completion or post a result with answer_task.");
+      } else if (state.status === "done" && state.result) {
+        parts.push("\nResult already posted.");
+      } else {
+        parts.push("\nIdle. Subscribe and wait for a visitor to click Run.");
+      }
+
+      return { content: [{ type: "text" as const, text: parts.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Failed: ${err}` }] };
+    }
+  }
+);
+
+server.tool(
+  "answer_task",
+  "Post an HTML result to a pending task. " +
+    "The result is rendered as rich HTML in the viewer. Use headings, lists, links, etc.",
+  {
+    station: z.string().describe('The task station name, e.g. "Reddit y2k"'),
+    result: z.string().describe('HTML result to display, e.g. "<h2>Results</h2><ul><li>...</li></ul>"'),
+  },
+  async ({ station, result }) => {
+    try {
+      const res = await fetch(`${HUB_URL}/api/task/${encodeURIComponent(station)}/result`, {
+        method: "POST",
+        headers: hubHeaders(),
+        body: JSON.stringify({ result }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        return { content: [{ type: "text" as const, text: `Task result failed: ${(err as { error: string }).error}` }] };
+      }
+      return { content: [{ type: "text" as const, text: `Result posted to "${station}"` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Task result failed: ${err}` }] };
     }
   }
 );
