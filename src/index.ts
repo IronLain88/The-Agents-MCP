@@ -855,18 +855,21 @@ server.tool(
 server.tool(
   "check_events",
   "Wait for the next event on your subscribed station (up to 10 min). For tasks, the event payload contains " +
-    "{station, instructions, prompt} telling you what to do. Call subscribe first.",
+    "{station, instructions} telling you what to do. Call subscribe first.",
   {},
   async () => {
     if (!subscribedStation) {
       return { content: [{ type: "text" as const, text: "Not subscribed to any signal. Call subscribe first." }] };
     }
     if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
+    const keepalive = setInterval(() => reportToHub(subscribedStation!, `Waiting for signal`).catch(() => {}), 120_000);
     try {
       const result = await waitForSignal();
       return { content: [{ type: "text" as const, text: result + "\n\nRemember to call update_state for your next activity." }] };
     } catch {
       return { content: [{ type: "text" as const, text: "No events (timeout). Remember to call update_state for your next activity." }] };
+    } finally {
+      clearInterval(keepalive);
     }
   }
 );
@@ -1005,9 +1008,6 @@ server.tool(
       if (state.status === "pending") {
         // Agent has work to do NOW
         if (instructions) parts.push(`## Instructions\n${instructions}\n`);
-        if ((state as any).prompt) {
-          parts.push(`## Visitor prompt\n${(state as any).prompt}\n`);
-        }
         parts.push(`## What to do`);
         parts.push(`1. Do the work described above`);
         parts.push(`2. Call answer_task("${station}", "<h2>Result</h2><p>your HTML result</p>")`);
@@ -1029,7 +1029,7 @@ server.tool(
 
 server.tool(
   "work_task",
-  "Wait for a visitor to trigger a task. Blocks until someone clicks Run, then returns the instructions and visitor prompt. " +
+  "Wait for a visitor to trigger a task. Blocks until someone clicks Run, then returns the instructions. " +
     "After doing the work, call answer_task with your HTML result, then call work_task again to wait for the next visitor.",
   {
     station: z.string().describe('The task station name, e.g. "Task_Table"'),
@@ -1058,13 +1058,16 @@ server.tool(
       } catch {}
 
       if (state.status !== "pending") {
-        // Subscribe and wait for visitor
+        // Subscribe and wait for visitor, sending keepalive heartbeats so the hub doesn't remove us
         subscribedStation = station;
         if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
+        const keepalive = setInterval(() => reportToHub(station, `Waiting at ${station}`).catch(() => {}), 120_000);
         try {
           await waitForSignal();
         } catch {
           return { content: [{ type: "text" as const, text: `Timeout waiting for visitor on "${station}". Call work_task again to keep waiting.` }] };
+        } finally {
+          clearInterval(keepalive);
         }
       }
 
@@ -1081,7 +1084,6 @@ server.tool(
       const parts: string[] = [`# Task: ${station}\n`];
       const instructions = (freshAsset as any)?.instructions;
       if (instructions) parts.push(`## Instructions\n${instructions}\n`);
-      if (freshState.prompt) parts.push(`## Visitor prompt\n${freshState.prompt}\n`);
       parts.push(`## Required steps`);
       parts.push(`1. Do the work described above`);
       parts.push(`2. Call answer_task("${station}", "<h2>Result</h2><p>your HTML</p>")`);
