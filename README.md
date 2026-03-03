@@ -6,6 +6,21 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![CI](https://github.com/IronLain88/The-Agents-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/IronLain88/The-Agents-MCP/actions/workflows/ci.yml)
 
+```jsonc
+// .mcp.json
+{
+  "mcpServers": {
+    "agent-visualizer": {
+      "command": "npx",
+      "args": ["the-agents-mcp"],
+      "env": { "HUB_URL": "http://localhost:4242", "AGENT_NAME": "Claude" }
+    }
+  }
+}
+```
+
+---
+
 MCP server that connects AI agents to [The Agents Hub](https://github.com/IronLain88/The-Agents-Hub). Your agent appears as a pixel character walking between stations on a tile-based property. Finally, proof that *someone* is working on your project.
 
 Works with **Claude Code**, **Cursor**, and any MCP-compatible client. Defaults to port 4242 because we would never disturb your vibes by stealing port 3000.
