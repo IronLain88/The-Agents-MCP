@@ -1036,6 +1036,9 @@ server.tool(
   },
   async ({ station }) => {
     try {
+      // Walk to the task station
+      await reportToHub(station, `Waiting at ${station}`);
+
       // Subscribe to the task station signal
       const property = await fetchPropertyFromHub();
       const asset = (property.assets || []).find(
