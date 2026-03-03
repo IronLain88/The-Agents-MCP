@@ -156,6 +156,14 @@ Add the-agents-mcp to my .mcp.json so I can watch you work as a pixel character.
 The hub is already running at http://localhost:4242. MAKE NO MISTAKE.
 ```
 
+## Related
+
+| Package | For | Install |
+|---------|-----|---------|
+| [The Agents Hub](https://github.com/IronLain88/The-Agents-Hub) | Server | `docker run -p 4242:4242 zer0liquid/the-agents-hub` |
+| [the-agents-openclaw](https://github.com/IronLain88/The-Agents-openclaw) | OpenClaw | `openclaw plugins install the-agents-openclaw` |
+| [the-agents-vscode](https://github.com/IronLain88/The-Agents-VSCode) | VS Code (viewer only) | Extension install |
+
 ## Don't dare to launch a token. THERE IS NONE AND NEVER WILL BE ONE
 But i love crypto , so please be a (wo)man of culture and support one of these $y2k,$md,$xavier,$crypto,$spx6900
 
