@@ -341,6 +341,7 @@ interface Asset {
   content?: { type: string; data: string; source?: string; publishedAt?: string };
   trigger?: string;
   trigger_interval?: number;
+  task?: boolean;
 }
 
 async function fetchPropertyFromHub(): Promise<{ assets: Asset[]; [key: string]: unknown }> {
@@ -994,24 +995,29 @@ server.tool(
       }
 
       const parts: string[] = [`# Task: ${station}\n`];
-
       const instructions = (asset as any).instructions;
-      if (instructions) {
-        parts.push(`## Instructions\n${instructions}\n`);
-      }
 
       let state = { status: "idle", result: null as string | null };
       try {
         if (asset.content?.data) state = JSON.parse(asset.content.data);
       } catch {}
 
-      parts.push(`## Status: ${state.status}`);
       if (state.status === "pending") {
-        parts.push("\nTask is running. Wait for completion or post a result with answer_task.");
-      } else if (state.status === "done" && state.result) {
-        parts.push("\nResult already posted.");
+        // Agent has work to do NOW
+        if (instructions) parts.push(`## Instructions\n${instructions}\n`);
+        if ((state as any).prompt) {
+          parts.push(`## Visitor prompt\n${(state as any).prompt}\n`);
+        }
+        parts.push(`## What to do`);
+        parts.push(`1. Do the work described above`);
+        parts.push(`2. Call answer_task("${station}", "<h2>Result</h2><p>your HTML result</p>")`);
+        parts.push(`3. answer_task will instruct you to call work_task again — you MUST do so`);
       } else {
-        parts.push("\nIdle. Subscribe and wait for a visitor to click Run.");
+        // No work yet — just tell agent to wait
+        parts.push(`Status: ${state.status === "done" ? "done (previous result posted)" : "idle"}`);
+        parts.push(`\n## What to do`);
+        parts.push(`Call work_task("${station}") — it blocks until a visitor clicks Run, then gives you instructions.`);
+        parts.push(`The loop is: work_task → do work → answer_task → work_task → ... (never stop)`);
       }
 
       return { content: [{ type: "text" as const, text: parts.join("\n") }] };
@@ -1022,9 +1028,74 @@ server.tool(
 );
 
 server.tool(
+  "work_task",
+  "Wait for a visitor to trigger a task. Blocks until someone clicks Run, then returns the instructions and visitor prompt. " +
+    "After doing the work, call answer_task with your HTML result, then call work_task again to wait for the next visitor.",
+  {
+    station: z.string().describe('The task station name, e.g. "Task_Table"'),
+  },
+  async ({ station }) => {
+    try {
+      // Subscribe to the task station signal
+      const property = await fetchPropertyFromHub();
+      const asset = (property.assets || []).find(
+        (a: Asset) => a.station === station && a.task
+      );
+      if (!asset) {
+        return { content: [{ type: "text" as const, text: `No task station "${station}" found` }] };
+      }
+      if (!asset.trigger) {
+        return { content: [{ type: "text" as const, text: `Task station "${station}" has no trigger` }] };
+      }
+
+      // Check if already pending (visitor already clicked Run)
+      let state = { status: "idle" } as Record<string, unknown>;
+      try {
+        if (asset.content?.data) state = JSON.parse(asset.content.data);
+      } catch {}
+
+      if (state.status !== "pending") {
+        // Subscribe and wait for visitor
+        subscribedStation = station;
+        if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
+        try {
+          await waitForSignal();
+        } catch {
+          return { content: [{ type: "text" as const, text: `Timeout waiting for visitor on "${station}". Call work_task again to keep waiting.` }] };
+        }
+      }
+
+      // Read the now-pending task
+      const freshProperty = await fetchPropertyFromHub();
+      const freshAsset = (freshProperty.assets || []).find(
+        (a: Asset) => a.station === station && a.task
+      );
+      let freshState = { status: "idle" } as Record<string, unknown>;
+      try {
+        if (freshAsset?.content?.data) freshState = JSON.parse(freshAsset.content.data);
+      } catch {}
+
+      const parts: string[] = [`# Task: ${station}\n`];
+      const instructions = (freshAsset as any)?.instructions;
+      if (instructions) parts.push(`## Instructions\n${instructions}\n`);
+      if (freshState.prompt) parts.push(`## Visitor prompt\n${freshState.prompt}\n`);
+      parts.push(`## Required steps`);
+      parts.push(`1. Do the work described above`);
+      parts.push(`2. Call answer_task("${station}", "<h2>Result</h2><p>your HTML</p>")`);
+      parts.push(`3. answer_task will tell you to call work_task again — you MUST do so to keep the loop running`);
+
+      return { content: [{ type: "text" as const, text: parts.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `work_task failed: ${err}` }] };
+    }
+  }
+);
+
+server.tool(
   "answer_task",
-  "Post your result (HTML) to a task station after completing the work from check_events. " +
-    "Rendered as rich HTML in the viewer. Use headings, lists, links, etc.",
+  "Post your result (HTML) to a task station after completing the work from work_task. " +
+    "Rendered as rich HTML in the viewer. Use headings, lists, links, etc. " +
+    "IMPORTANT: After this call returns, you MUST immediately call work_task() again to wait for the next visitor. Never stop the loop.",
   {
     station: z.string().describe('The task station name, e.g. "Reddit y2k"'),
     result: z.string().describe('HTML result to display, e.g. "<h2>Results</h2><ul><li>...</li></ul>"'),
@@ -1040,7 +1111,10 @@ server.tool(
         const err = await res.json().catch(() => ({ error: res.statusText }));
         return { content: [{ type: "text" as const, text: `Task result failed: ${(err as { error: string }).error}` }] };
       }
-      return { content: [{ type: "text" as const, text: `Result posted to "${station}"` }] };
+      return { content: [{ type: "text" as const, text:
+        `Result posted to "${station}".\n\n` +
+        `⚠️ REQUIRED NEXT STEP: Call work_task("${station}") now to wait for the next visitor. Do not stop — the task loop must continue.`
+      }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Task result failed: ${err}` }] };
     }
@@ -1070,6 +1144,26 @@ async function main() {
     console.error("[agent-visualizer] Could not fetch property for residents:", err);
   }
 }
+
+// Graceful shutdown: remove agent from hub so parallel instances aren't affected
+async function cleanup() {
+  try {
+    await fetch(`${HUB_URL}/api/agents/${encodeURIComponent(AGENT_ID)}`, {
+      method: "DELETE",
+      headers: { ...(API_KEY && { Authorization: `Bearer ${API_KEY}` }) },
+    });
+    console.error(`[agent-visualizer] Removed agent ${AGENT_ID} from hub`);
+  } catch {}
+}
+
+process.on("SIGINT", async () => { await cleanup(); process.exit(0); });
+process.on("SIGTERM", async () => { await cleanup(); process.exit(0); });
+process.on("exit", () => {
+  // Sync last-resort attempt (fire-and-forget, may not complete)
+  try {
+    execSync(`curl -s -X DELETE -H "Authorization: Bearer ${API_KEY}" "${HUB_URL}/api/agents/${encodeURIComponent(AGENT_ID)}"`, { timeout: 2000, stdio: "ignore" });
+  } catch {}
+});
 
 main().catch((err) => {
   console.error("[agent-visualizer] Fatal error:", err);
