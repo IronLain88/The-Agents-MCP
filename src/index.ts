@@ -1009,9 +1009,10 @@ server.tool(
         // Agent has work to do NOW
         if (instructions) parts.push(`## Instructions\n${instructions}\n`);
         parts.push(`## What to do`);
-        parts.push(`1. Do the work described above`);
-        parts.push(`2. Call answer_task("${station}", "<h2>Result</h2><p>your HTML result</p>")`);
-        parts.push(`3. answer_task will instruct you to call work_task again — you MUST do so`);
+        parts.push(`1. Call update_state before EVERY step so viewers see you working (e.g. searching, reading, writing_code, thinking). This is mandatory — the user watches your character move around.`);
+        parts.push(`2. Do the work described above`);
+        parts.push(`3. Call answer_task("${station}", "<h2>Result</h2><p>your HTML result</p>")`);
+        parts.push(`4. answer_task will instruct you to call work_task again — you MUST do so`);
       } else {
         // No work yet — just tell agent to wait
         parts.push(`Status: ${state.status === "done" ? "done (previous result posted)" : "idle"}`);
@@ -1085,9 +1086,10 @@ server.tool(
       const instructions = (freshAsset as any)?.instructions;
       if (instructions) parts.push(`## Instructions\n${instructions}\n`);
       parts.push(`## Required steps`);
-      parts.push(`1. Do the work described above`);
-      parts.push(`2. Call answer_task("${station}", "<h2>Result</h2><p>your HTML</p>")`);
-      parts.push(`3. answer_task will tell you to call work_task again — you MUST do so to keep the loop running`);
+      parts.push(`1. Call update_state before EVERY step so viewers see you working (e.g. searching, reading, writing_code, thinking). This is mandatory — the user watches your character move around.`);
+      parts.push(`2. Do the work described above`);
+      parts.push(`3. Call answer_task("${station}", "<h2>Result</h2><p>your HTML</p>")`);
+      parts.push(`4. answer_task will tell you to call work_task again — you MUST do so to keep the loop running`);
 
       return { content: [{ type: "text" as const, text: parts.join("\n") }] };
     } catch (err) {
