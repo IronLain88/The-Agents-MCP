@@ -95,6 +95,7 @@ interface WelcomeData {
   signals: string[];
   boards: string[];
   tasks: string[];
+  openclawTasks?: string[];
   inbox: number;
   agents: { name: string; state: string }[];
 }
@@ -150,6 +151,10 @@ function formatWelcome(w: WelcomeData): string {
     for (const t of w.tasks) lines.push(`  - ${t}`);
     lines.push(`*Workflow: subscribe({name}) → check_events() (blocks until triggered) → do the work → answer_task({station, result}) → check_events() again*`);
   }
+  if (w.openclawTasks && w.openclawTasks.length > 0) {
+    lines.push(`**OpenClaw task stations (auto-spawn — do NOT call work_task on these):**`);
+    for (const t of w.openclawTasks) lines.push(`  - ${t}`);
+  }
   if (w.signals.length > 0) lines.push(`**Signals:** ${w.signals.join(", ")}`);
   if (w.boards.length > 0) lines.push(`**Boards with content:** ${w.boards.join(", ")}`);
   return lines.join("\n");
@@ -193,11 +198,14 @@ server.tool(
       let inboxCount = 0;
 
       const tasks: string[] = [];
+      const openclawTasks: string[] = [];
 
       for (const a of assets) {
         if (!a.station) continue;
         if ((a as any).task) {
-          tasks.push(`${a.station} — ${(a as any).instructions || "(no instructions)"}`);
+          const entry = `${a.station} — ${(a as any).instructions || "(no instructions)"}`;
+          if ((a as any).openclaw_task) openclawTasks.push(entry);
+          else tasks.push(entry);
           continue;
         }
         if (a.trigger) {
@@ -221,6 +229,10 @@ server.tool(
         lines.push(`**Task stations (interactive — visitors trigger these, you do the work):**`);
         for (const t of tasks) lines.push(`  - ${t}`);
         lines.push(`*Workflow: subscribe({name}) → check_events() (blocks until triggered) → do the work → answer_task({station, result}) → check_events() again*`);
+      }
+      if (openclawTasks.length > 0) {
+        lines.push(`**OpenClaw task stations (auto-spawn — do NOT call work_task on these):**`);
+        for (const t of openclawTasks) lines.push(`  - ${t}`);
       }
       if (signals.length > 0) lines.push(`**Signals:** ${signals.join(", ")}`);
       if (boards.length > 0) lines.push(`**Boards with content:** ${boards.join(", ")}`);
@@ -342,6 +354,7 @@ interface Asset {
   trigger?: string;
   trigger_interval?: number;
   task?: boolean;
+  openclaw_task?: boolean;
 }
 
 async function fetchPropertyFromHub(): Promise<{ assets: Asset[]; [key: string]: unknown }> {
@@ -408,8 +421,9 @@ server.tool(
     collision: z.boolean().optional().describe("Block movement through this tile"),
     remote_url: z.string().optional().describe("Remote hub URL to read a board from another property"),
     remote_station: z.string().optional().describe("Station name on the remote hub"),
+    openclaw_task: z.boolean().optional().describe("Mark as an OpenClaw auto-spawn task station (agent spawns on demand, no work_task loop)"),
   },
-  async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station }) => {
+  async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station, openclaw_task }) => {
     try {
       const body: Record<string, unknown> = { name };
       if (tileset !== undefined) body.tileset = tileset;
@@ -422,6 +436,7 @@ server.tool(
       if (collision !== undefined) body.collision = collision;
       if (remote_url) body.remote_url = remote_url;
       if (remote_station) body.remote_station = remote_station;
+      if (openclaw_task) body.openclaw_task = true;
 
       const res = await fetch(`${HUB_URL}/api/assets`, {
         method: "POST",
@@ -1048,6 +1063,9 @@ server.tool(
       if (!asset) {
         return { content: [{ type: "text" as const, text: `No task station "${station}" found` }] };
       }
+      if ((asset as any).openclaw_task) {
+        return { content: [{ type: "text" as const, text: `"${station}" is an openclaw_task station — agents are spawned on demand when visitors click Run. Do NOT call work_task on these. Use answer_task after completing the work instead.` }] };
+      }
       if (!asset.trigger) {
         return { content: [{ type: "text" as const, text: `Task station "${station}" has no trigger` }] };
       }
@@ -1117,6 +1135,21 @@ server.tool(
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
         return { content: [{ type: "text" as const, text: `Task result failed: ${(err as { error: string }).error}` }] };
+      }
+
+      // Check if this is an openclaw_task — spawned agents should exit, not loop
+      let isOpenclawTask = false;
+      try {
+        const property = await fetchPropertyFromHub();
+        const asset = (property.assets || []).find((a: Asset) => a.station === station && a.task);
+        if ((asset as any)?.openclaw_task) isOpenclawTask = true;
+      } catch {}
+
+      if (isOpenclawTask) {
+        return { content: [{ type: "text" as const, text:
+          `Result posted to "${station}".\n\n` +
+          `✅ Your work is done. This is an openclaw_task station — no need to loop. You may exit or go idle.`
+        }] };
       }
       return { content: [{ type: "text" as const, text:
         `Result posted to "${station}".\n\n` +
