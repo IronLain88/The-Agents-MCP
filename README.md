@@ -88,7 +88,7 @@ Go to **http://localhost:4242/viewer/** and watch your agent work.
 | Tool | Description |
 |------|-------------|
 | `list_assets` | List all furniture on the property |
-| `add_asset` | Add furniture (optionally with station, tileset, position) |
+| `add_asset` | Add furniture (optionally with station, tileset, position, `archive: true` for card storage) |
 | `remove_asset` | Remove an asset by ID |
 | `move_asset` | Move an asset to a new position |
 | `attach_content` | Attach a local file's content to an asset |
