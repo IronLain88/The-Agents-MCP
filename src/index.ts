@@ -179,71 +179,18 @@ server.tool(
   "Get a summary of your property: available stations, signals, boards, and inbox. Called automatically on first connect, but useful to refresh.",
   {},
   async () => {
-    const lines = [
-      "# The Agents",
-      "",
-      "You have a property — a tile grid with furniture. Each furniture piece can be tagged with a **station** name.",
-      "When you call `update_state({ state, detail })`, your character walks to the matching station.",
-      "Update state at EVERY transition. Set idle when done.",
-      "",
-    ];
-
-    // Dynamic: scan property for what's actually there
     try {
-      const property = await fetchPropertyFromHub();
-      const assets = property.assets || [];
-      const stations: string[] = [];
-      const signals: string[] = [];
-      const boards: string[] = [];
-      let inboxCount = 0;
-
-      const tasks: string[] = [];
-      const openclawTasks: string[] = [];
-
-      for (const a of assets) {
-        if (!a.station) continue;
-        if ((a as any).task) {
-          const entry = `${a.station} — ${(a as any).instructions || "(no instructions)"}`;
-          if ((a as any).openclaw_task) openclawTasks.push(entry);
-          else tasks.push(entry);
-          continue;
-        }
-        if (a.trigger) {
-          signals.push(`${a.name || a.station} (${a.trigger}, every ${a.trigger_interval || 1} min)`);
-        } else if (a.station === "inbox" && a.content?.data) {
-          try {
-            const msgs = JSON.parse(a.content.data);
-            if (Array.isArray(msgs)) inboxCount += msgs.length;
-          } catch {}
-          if (!stations.includes(a.station)) stations.push(a.station);
-        } else {
-          if (!stations.includes(a.station)) stations.push(a.station);
-          if (a.content?.data) boards.push(a.name || a.station);
-        }
+      const res = await fetch(`${HUB_URL}/api/welcome`, {
+        headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
+      });
+      if (res.ok) {
+        const { text } = await res.json() as { source: string; text: string };
+        return { content: [{ type: "text" as const, text }] };
       }
+    } catch {}
 
-      lines.push(`## Your Property`);
-      lines.push(`**Stations:** ${stations.join(", ") || "none"}`);
-      if (inboxCount > 0) lines.push(`**Inbox:** ${inboxCount} message(s)`);
-      if (tasks.length > 0) {
-        lines.push(`**Task stations (interactive — visitors trigger these, you do the work):**`);
-        for (const t of tasks) lines.push(`  - ${t}`);
-        lines.push(`*Workflow: subscribe({name}) → check_events() (blocks until triggered) → do the work → answer_task({station, result}) → check_events() again*`);
-      }
-      if (openclawTasks.length > 0) {
-        lines.push(`**OpenClaw task stations (auto-spawn — do NOT call work_task on these):**`);
-        for (const t of openclawTasks) lines.push(`  - ${t}`);
-      }
-      if (signals.length > 0) lines.push(`**Signals:** ${signals.join(", ")}`);
-      if (boards.length > 0) lines.push(`**Boards with content:** ${boards.join(", ")}`);
-      const archiveStations = assets.filter((a: any) => a.archive).map((a: any) => a.name || a.station || 'archive');
-      if (archiveStations.length > 0) lines.push(`**Archive:** ${archiveStations.join(", ")}`);
-      lines.push(`**Total assets:** ${assets.length}`);
-    } catch {
-      lines.push("*(Could not fetch property)*");
-    }
-
-    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    // Fallback: generate locally if hub endpoint unavailable
+    return { content: [{ type: "text" as const, text: "*(Could not fetch welcome info from hub)*" }] };
   }
 );
 
@@ -425,8 +372,9 @@ server.tool(
     remote_station: z.string().optional().describe("Station name on the remote hub"),
     openclaw_task: z.boolean().optional().describe("Mark as an OpenClaw auto-spawn task station (agent spawns on demand, no work_task loop)"),
     archive: z.boolean().optional().describe("Mark as an archive station for storing completed cards"),
+    welcome: z.boolean().optional().describe("Mark as a welcome board — its content becomes the welcome message all agents see on connect"),
   },
-  async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station, openclaw_task, archive }) => {
+  async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station, openclaw_task, archive, welcome }) => {
     try {
       const body: Record<string, unknown> = { name };
       if (tileset !== undefined) body.tileset = tileset;
@@ -441,6 +389,7 @@ server.tool(
       if (remote_station) body.remote_station = remote_station;
       if (openclaw_task) body.openclaw_task = true;
       if (archive) body.archive = true;
+      if (welcome) body.welcome = true;
 
       const res = await fetch(`${HUB_URL}/api/assets`, {
         method: "POST",
@@ -714,14 +663,17 @@ server.tool(
   {
     text: z.string().describe("The message to send"),
     inbox: z.string().optional().describe('Target inbox name (default: "inbox"). Use for named inboxes like "inbox-bugs".'),
+    mood: z.string().optional().describe('Optional mood/vibe for the message (e.g. "caffeinated", "existential dread", "triumphant")'),
   },
-  async ({ text, inbox }) => {
+  async ({ text, inbox, mood }) => {
     const target = inbox || "inbox";
     try {
+      const body: Record<string, string> = { from: agentName, text };
+      if (mood) body.mood = mood;
       const res = await fetch(`${HUB_URL}/api/inbox/${encodeURIComponent(target)}`, {
         method: "POST",
         headers: hubHeaders(),
-        body: JSON.stringify({ from: agentName, text }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
