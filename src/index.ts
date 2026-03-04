@@ -236,6 +236,8 @@ server.tool(
       }
       if (signals.length > 0) lines.push(`**Signals:** ${signals.join(", ")}`);
       if (boards.length > 0) lines.push(`**Boards with content:** ${boards.join(", ")}`);
+      const archiveStations = assets.filter((a: any) => a.archive).map((a: any) => a.name || a.station || 'archive');
+      if (archiveStations.length > 0) lines.push(`**Archive:** ${archiveStations.join(", ")}`);
       lines.push(`**Total assets:** ${assets.length}`);
     } catch {
       lines.push("*(Could not fetch property)*");
@@ -422,8 +424,9 @@ server.tool(
     remote_url: z.string().optional().describe("Remote hub URL to read a board from another property"),
     remote_station: z.string().optional().describe("Station name on the remote hub"),
     openclaw_task: z.boolean().optional().describe("Mark as an OpenClaw auto-spawn task station (agent spawns on demand, no work_task loop)"),
+    archive: z.boolean().optional().describe("Mark as an archive station for storing completed cards"),
   },
-  async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station, openclaw_task }) => {
+  async ({ name, tileset, tx, ty, x, y, station, approach, collision, remote_url, remote_station, openclaw_task, archive }) => {
     try {
       const body: Record<string, unknown> = { name };
       if (tileset !== undefined) body.tileset = tileset;
@@ -437,6 +440,7 @@ server.tool(
       if (remote_url) body.remote_url = remote_url;
       if (remote_station) body.remote_station = remote_station;
       if (openclaw_task) body.openclaw_task = true;
+      if (archive) body.archive = true;
 
       const res = await fetch(`${HUB_URL}/api/assets`, {
         method: "POST",
@@ -1065,6 +1069,9 @@ server.tool(
       }
       if ((asset as any).openclaw_task) {
         return { content: [{ type: "text" as const, text: `"${station}" is an openclaw_task station — agents are spawned on demand when visitors click Run. Do NOT call work_task on these. Use answer_task after completing the work instead.` }] };
+      }
+      if ((asset as any).assigned_to && !AGENT_ID.startsWith((asset as any).assigned_to)) {
+        return { content: [{ type: "text" as const, text: `Task "${station}" is assigned to "${(asset as any).assigned_to}" only. Your agent ID "${AGENT_ID}" does not match.` }] };
       }
       if (!asset.trigger) {
         return { content: [{ type: "text" as const, text: `Task station "${station}" has no trigger` }] };
