@@ -838,12 +838,19 @@ async function tryClaimPendingTask(station: string): Promise<string | null> {
 
     const parts: string[] = [`# Task: ${station}\n`];
     const instructions = (asset as any).instructions;
-    if (instructions) parts.push(`## Instructions\n${instructions}\n`);
-    if (state.prompt) parts.push(`## Prompt\n${state.prompt}\n`);
+    const prompt = state.prompt as string | undefined;
+    if (instructions && prompt) {
+      parts.push(`## Instructions\n${instructions}\n`);
+      parts.push(`## Request\n${prompt}\n`);
+    } else if (instructions) {
+      parts.push(`## Instructions\n${instructions}\n`);
+    } else if (prompt) {
+      parts.push(`## Instructions\n${prompt}\n`);
+    }
     parts.push(`## Required steps`);
     parts.push(`1. Call update_state before EVERY step so viewers see you working (e.g. searching, reading, writing_code, thinking). This is mandatory.`);
-    parts.push(`2. Do the work described above`);
-    parts.push(`3. Call answer_task("${station}", "<h2>Result</h2><p>your HTML</p>")`);
+    parts.push(`2. Do the work described in the instructions above`);
+    parts.push(`3. Call answer_task("${station}", "<h2>Result</h2><p>your HTML result</p>")`);
     parts.push(`4. Then call check_events() again to wait for the next task`);
     return parts.join("\n");
   } catch { return null; }
