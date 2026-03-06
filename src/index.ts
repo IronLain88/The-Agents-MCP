@@ -1206,6 +1206,9 @@ server.tool(
         return { content: [{ type: "text" as const, text: `Task result failed: ${(err as { error: string }).error}` }] };
       }
 
+      // Walk to the task station to visually "deliver" the result
+      await reportToHub(station, "Task complete");
+
       // Check if this is an openclaw_task — spawned agents should exit, not loop
       let isOpenclawTask = false;
       try {
