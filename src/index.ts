@@ -737,7 +737,7 @@ interface SignalMessage {
 }
 
 let signalWs: WebSocket | null = null;
-let subscribedStation: string | null = null;
+let subscribedStations: string[] = [];
 let pendingResolve: ((msg: SignalMessage) => void) | null = null;
 
 // Signal queue to buffer signals while agent is working
@@ -750,7 +750,7 @@ function connectSignalWs() {
   signalWs.on("message", (raw: Buffer) => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.type === "signal" && msg.station === subscribedStation) {
+      if (msg.type === "signal" && subscribedStations.includes(msg.station)) {
         // If someone is waiting, resolve immediately
         if (pendingResolve) {
           const resolve = pendingResolve;
@@ -772,7 +772,7 @@ function connectSignalWs() {
   });
   signalWs.on("close", () => {
     signalWs = null;
-    if (subscribedStation) setTimeout(connectSignalWs, 3_000);
+    if (subscribedStations.length > 0) setTimeout(connectSignalWs, 3_000);
   });
   signalWs.on("error", () => {});
 }
@@ -783,7 +783,7 @@ function formatSignalEvent(msg: SignalMessage): string {
     timestamp: msg.timestamp,
     time: new Date(msg.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
     trigger: msg.trigger,
-    station: subscribedStation,
+    station: msg.station,
     payload: msg.payload,
     queueSize: signalQueue.length
   };
@@ -858,26 +858,50 @@ async function tryClaimPendingTask(station: string): Promise<string | null> {
 
 server.tool(
   "subscribe",
-  "Subscribe to a signal or task station. After subscribing, call check_events() in a loop. " +
+  "Subscribe to station(s). After subscribing, call check_events() in a loop. " +
+    "With no name: subscribes to ALL task stations you're allowed to work on. " +
+    "With a name: subscribes to that specific signal or task station. " +
     "For tasks: check_events returns instructions → do work → answer_task → check_events again. " +
     "For signals: check_events returns the event payload.",
   {
-    name: z.string().describe('Station name — signal (e.g. "Deploy Check") or task (e.g. "task_table"). Must match an asset on the property.'),
+    name: z.string().optional().describe('Station name, or omit to subscribe to all your task stations'),
   },
   async ({ name }) => {
     try {
       const property = await fetchPropertyFromHub();
+
+      if (!name) {
+        // Subscribe to all non-openclaw task stations this agent is allowed to work on
+        const taskStations = (property.assets || []).filter((a: Asset) => {
+          if (!a.task || (a as any).openclaw_task) return false;
+          const assignedTo = (a as any).assigned_to;
+          return !assignedTo || AGENT_ID.startsWith(assignedTo);
+        });
+        if (taskStations.length === 0) {
+          return { content: [{ type: "text" as const, text: "No task stations available for you on this property." }] };
+        }
+        subscribedStations = taskStations.map((a: Asset) => a.station).filter((s): s is string => !!s);
+        if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
+
+        const names = subscribedStations.join(", ");
+        // Check if any tasks are already pending
+        const pendingStations = taskStations.filter((a: Asset) => {
+          try { return a.content?.data && JSON.parse(a.content.data).status === "pending"; } catch { return false; }
+        });
+        const pending = pendingStations.length > 0 ? ` ${pendingStations.length} task(s) already pending — call check_events() now.` : "";
+        return { content: [{ type: "text" as const, text: `Subscribed to ${subscribedStations.length} task station(s): ${names}. Call check_events() to wait for work.${pending}` }] };
+      }
+
       const asset = (property.assets || []).find(
         (a: Asset) => a.station === name && (a.trigger || a.task)
       );
       if (!asset) {
         return { content: [{ type: "text" as const, text: `No signal or task station "${name}" found on property` }] };
       }
-      subscribedStation = name;
+      subscribedStations = [name];
       if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
 
       if (asset.task) {
-        // Check if task is already pending (someone already clicked Run)
         let state = { status: "idle" } as Record<string, unknown>;
         try { if (asset.content?.data) state = JSON.parse(asset.content.data); } catch {}
         const pending = state.status === "pending" ? " A task is already pending — call check_events() now." : "";
@@ -894,29 +918,33 @@ server.tool(
 
 server.tool(
   "check_events",
-  "Wait for the next event on your subscribed station (up to 10 min). " +
+  "Wait for the next event on your subscribed station(s) (up to 10 min). " +
     "For task stations, automatically claims the task and returns structured instructions. " +
     "Call subscribe first.",
   {},
   async () => {
-    if (!subscribedStation) {
-      return { content: [{ type: "text" as const, text: "Not subscribed to any station. Call subscribe first." }] };
+    if (subscribedStations.length === 0) {
+      return { content: [{ type: "text" as const, text: "Not subscribed to any station. Call subscribe() first." }] };
     }
     if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
 
-    // Check if task is already pending before waiting (e.g. card delegated before we started listening)
-    const pendingResult = await tryClaimPendingTask(subscribedStation);
-    if (pendingResult) return { content: [{ type: "text" as const, text: pendingResult }] };
+    // Check if any task is already pending before waiting
+    for (const station of subscribedStations) {
+      const pendingResult = await tryClaimPendingTask(station);
+      if (pendingResult) return { content: [{ type: "text" as const, text: pendingResult }] };
+    }
 
-    const isTask = await isTaskStation(subscribedStation);
-    const waitMsg = isTask ? `Waiting at ${subscribedStation}` : `Waiting for signal`;
-    const keepalive = setInterval(() => reportToHub(subscribedStation!, waitMsg).catch(() => {}), 120_000);
+    const stationList = subscribedStations.join(", ");
+    const waitMsg = subscribedStations.length > 1 ? `On duty (${subscribedStations.length} stations)` : `Waiting at ${subscribedStations[0]}`;
+    const keepalive = setInterval(() => reportToHub(subscribedStations[0], waitMsg).catch(() => {}), 120_000);
     try {
       const result = await waitForSignal();
 
-      // If subscribed to a task station, auto-claim and return structured instructions
-      const taskResult = await tryClaimPendingTask(subscribedStation);
-      if (taskResult) return { content: [{ type: "text" as const, text: taskResult }] };
+      // After signal, check all subscribed task stations for pending work
+      for (const station of subscribedStations) {
+        const taskResult = await tryClaimPendingTask(station);
+        if (taskResult) return { content: [{ type: "text" as const, text: taskResult }] };
+      }
 
       return { content: [{ type: "text" as const, text: result + "\n\nRemember to call update_state for your next activity." }] };
     } catch {
@@ -1119,7 +1147,7 @@ server.tool(
 
       if (state.status !== "pending") {
         // Subscribe and wait for visitor, sending keepalive heartbeats so the hub doesn't remove us
-        subscribedStation = station;
+        subscribedStations = [station];
         if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
         const keepalive = setInterval(() => reportToHub(station, `Waiting at ${station}`).catch(() => {}), 120_000);
         try {
