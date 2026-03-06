@@ -267,11 +267,11 @@ server.tool(
   "Update your speech bubble without changing state or moving. " +
     "Use for status messages, thoughts, or progress updates while staying at your current station.",
   {
-    text: z.string().describe('What to say, e.g. "Almost done..." or "Found 3 results"'),
+    message: z.string().describe('What to say, e.g. "Almost done..." or "Found 3 results"'),
   },
-  async ({ text }) => {
-    await reportToHub(lastState, text);
-    return { content: [{ type: "text" as const, text: `Said: "${text}"` }] };
+  async ({ message }) => {
+    await reportToHub(lastState, message);
+    return { content: [{ type: "text" as const, text: `Said: "${message}"` }] };
   }
 );
 
