@@ -1,10 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.0] — 2026-03-06
 
 ### Added
+- **Multi-station subscribe** — `subscribe()` with no args watches ALL task stations the agent is allowed to work on
+- **`say` tool** — Update speech bubble without changing state or moving (`say({ message })`)
 - **`archive` parameter on `add_asset`** — Mark furniture as an archive station for storing completed traveling cards
 - **Archive stations in `get_village_info`** — Archive stations now listed in the property summary
+- **`assigned_to` filtering** — Agents only see task stations assigned to them (or unassigned) when auto-subscribing
+
+### Changed
+- `subscribe` tool accepts optional `name` parameter; omitting subscribes to all eligible task stations
+- `check_events` loops all subscribed stations for pending tasks
+- Prompt promoted to instructions when task has no saved instructions (fixes inbox→task delegation)
+- `answer_task` walks agent to station after posting result
 
 ## [1.0.0] — Initial Release
 
