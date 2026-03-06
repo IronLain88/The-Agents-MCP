@@ -85,6 +85,7 @@ const API_KEY = process.env.API_KEY;
 const BASE_ID = process.env.AGENT_ID || "default";
 const AGENT_ID = `${BASE_ID}-${Math.random().toString(36).slice(2, 6)}`;
 let agentName = process.env.AGENT_NAME || "Agent";
+let lastState: string = "idle";
 const AGENT_SPRITE = process.env.AGENT_SPRITE || "";
 const repo = detectRepo();
 const OWNER_ID = process.env.OWNER_ID || repo.id;
@@ -253,10 +254,24 @@ server.tool(
     ),
   },
   async ({ state, detail, note }) => {
+    lastState = state;
     const welcome = await reportToHub(state, detail, AGENT_ID, agentName, null, undefined, note);
     const msg = `State updated to "${state}" (${getGroup(state)}): ${detail}`;
     const text = welcome ? `${msg}\n\n${formatWelcome(welcome)}` : msg;
     return { content: [{ type: "text" as const, text }] };
+  }
+);
+
+server.tool(
+  "say",
+  "Update your speech bubble without changing state or moving. " +
+    "Use for status messages, thoughts, or progress updates while staying at your current station.",
+  {
+    message: z.string().describe('What to say, e.g. "Almost done..." or "Found 3 results"'),
+  },
+  async ({ message }) => {
+    await reportToHub(lastState, message);
+    return { content: [{ type: "text" as const, text: `Said: "${message}"` }] };
   }
 );
 
@@ -797,26 +812,80 @@ async function waitForSignal(): Promise<string> {
   return formatSignalEvent(msg);
 }
 
+async function isTaskStation(station: string): Promise<boolean> {
+  try {
+    const property = await fetchPropertyFromHub();
+    const asset = (property.assets || []).find((a: Asset) => a.station === station && a.task);
+    return !!asset;
+  } catch { return false; }
+}
+
+async function tryClaimPendingTask(station: string): Promise<string | null> {
+  try {
+    const property = await fetchPropertyFromHub();
+    const asset = (property.assets || []).find((a: Asset) => a.station === station && a.task);
+    if (!asset) return null;
+
+    let state = { status: "idle" } as Record<string, unknown>;
+    try { if (asset.content?.data) state = JSON.parse(asset.content.data); } catch {}
+    if (state.status !== "pending") return null;
+
+    // Auto-claim
+    await fetch(`${HUB_URL}/api/task/${encodeURIComponent(station)}/claim`, {
+      method: "POST", headers: hubHeaders(),
+      body: JSON.stringify({ agent_id: AGENT_ID }),
+    });
+
+    const parts: string[] = [`# Task: ${station}\n`];
+    const instructions = (asset as any).instructions;
+    const prompt = state.prompt as string | undefined;
+    if (instructions && prompt) {
+      parts.push(`## Instructions\n${instructions}\n`);
+      parts.push(`## Request\n${prompt}\n`);
+    } else if (instructions) {
+      parts.push(`## Instructions\n${instructions}\n`);
+    } else if (prompt) {
+      parts.push(`## Instructions\n${prompt}\n`);
+    }
+    parts.push(`## Required steps`);
+    parts.push(`1. Call update_state before EVERY step so viewers see you working (e.g. searching, reading, writing_code, thinking). This is mandatory.`);
+    parts.push(`2. Do the work described in the instructions above`);
+    parts.push(`3. Call answer_task("${station}", "<h2>Result</h2><p>your HTML result</p>")`);
+    parts.push(`4. Then call check_events() again to wait for the next task`);
+    return parts.join("\n");
+  } catch { return null; }
+}
+
 server.tool(
   "subscribe",
-  "Subscribe to a signal or task station. For tasks: subscribe → check_events (returns instructions) → do work → answer_task. " +
-    "Signals fire on a timer (heartbeat) or manually.",
+  "Subscribe to a signal or task station. After subscribing, call check_events() in a loop. " +
+    "For tasks: check_events returns instructions → do work → answer_task → check_events again. " +
+    "For signals: check_events returns the event payload.",
   {
-    name: z.string().describe('The signal station name, e.g. "Gold Watch". Must match an asset with a trigger on the property.'),
+    name: z.string().describe('Station name — signal (e.g. "Deploy Check") or task (e.g. "task_table"). Must match an asset on the property.'),
   },
   async ({ name }) => {
     try {
       const property = await fetchPropertyFromHub();
       const asset = (property.assets || []).find(
-        (a: Asset) => a.station === name && a.trigger
+        (a: Asset) => a.station === name && (a.trigger || a.task)
       );
       if (!asset) {
-        return { content: [{ type: "text" as const, text: `No signal named "${name}" found on property` }] };
+        return { content: [{ type: "text" as const, text: `No signal or task station "${name}" found on property` }] };
       }
       subscribedStation = name;
       if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
+
+      if (asset.task) {
+        // Check if task is already pending (someone already clicked Run)
+        let state = { status: "idle" } as Record<string, unknown>;
+        try { if (asset.content?.data) state = JSON.parse(asset.content.data); } catch {}
+        const pending = state.status === "pending" ? " A task is already pending — call check_events() now." : "";
+        return { content: [{ type: "text" as const, text: `Subscribed to task station "${name}". Call check_events() to wait for work.${pending}` }] };
+      }
+
       const interval = asset.trigger_interval || 1;
-      return { content: [{ type: "text" as const, text: `Subscribed to "${name}" (${asset.trigger} every ${interval} min)` }] };
+      return { content: [{ type: "text" as const, text: `Subscribed to "${name}" (${asset.trigger} every ${interval} min). Call check_events() to wait.` }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Subscribe failed: ${err}` }] };
     }
@@ -825,20 +894,33 @@ server.tool(
 
 server.tool(
   "check_events",
-  "Wait for the next event on your subscribed station (up to 10 min). For tasks, the event payload contains " +
-    "{station, instructions} telling you what to do. Call subscribe first.",
+  "Wait for the next event on your subscribed station (up to 10 min). " +
+    "For task stations, automatically claims the task and returns structured instructions. " +
+    "Call subscribe first.",
   {},
   async () => {
     if (!subscribedStation) {
-      return { content: [{ type: "text" as const, text: "Not subscribed to any signal. Call subscribe first." }] };
+      return { content: [{ type: "text" as const, text: "Not subscribed to any station. Call subscribe first." }] };
     }
     if (!signalWs || signalWs.readyState !== WebSocket.OPEN) connectSignalWs();
-    const keepalive = setInterval(() => reportToHub(subscribedStation!, `Waiting for signal`).catch(() => {}), 120_000);
+
+    // Check if task is already pending before waiting (e.g. card delegated before we started listening)
+    const pendingResult = await tryClaimPendingTask(subscribedStation);
+    if (pendingResult) return { content: [{ type: "text" as const, text: pendingResult }] };
+
+    const isTask = await isTaskStation(subscribedStation);
+    const waitMsg = isTask ? `Waiting at ${subscribedStation}` : `Waiting for signal`;
+    const keepalive = setInterval(() => reportToHub(subscribedStation!, waitMsg).catch(() => {}), 120_000);
     try {
       const result = await waitForSignal();
+
+      // If subscribed to a task station, auto-claim and return structured instructions
+      const taskResult = await tryClaimPendingTask(subscribedStation);
+      if (taskResult) return { content: [{ type: "text" as const, text: taskResult }] };
+
       return { content: [{ type: "text" as const, text: result + "\n\nRemember to call update_state for your next activity." }] };
     } catch {
-      return { content: [{ type: "text" as const, text: "No events (timeout). Remember to call update_state for your next activity." }] };
+      return { content: [{ type: "text" as const, text: "No events (timeout). Call check_events() again to keep waiting." }] };
     } finally {
       clearInterval(keepalive);
     }
@@ -1077,9 +1159,9 @@ server.tool(
 
 server.tool(
   "answer_task",
-  "Post your result (HTML) to a task station after completing the work from work_task. " +
+  "Post your result (HTML) to a task station after completing the work. " +
     "Rendered as rich HTML in the viewer. Use headings, lists, links, etc. " +
-    "IMPORTANT: After this call returns, you MUST immediately call work_task() again to wait for the next visitor. Never stop the loop.",
+    "IMPORTANT: After this call returns, you MUST immediately call check_events() again to wait for the next task. Never stop the loop.",
   {
     station: z.string().describe('The task station name, e.g. "Reddit y2k"'),
     result: z.string().describe('HTML result to display, e.g. "<h2>Results</h2><ul><li>...</li></ul>"'),
@@ -1112,7 +1194,7 @@ server.tool(
       }
       return { content: [{ type: "text" as const, text:
         `Result posted to "${station}".\n\n` +
-        `⚠️ REQUIRED NEXT STEP: Call work_task("${station}") now to wait for the next visitor. Do not stop — the task loop must continue.`
+        `⚠️ REQUIRED NEXT STEP: Call check_events() now to wait for the next task. Do not stop — the loop must continue.`
       }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `Task result failed: ${err}` }] };
