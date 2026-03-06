@@ -836,6 +836,38 @@ server.tool(
     const keepalive = setInterval(() => reportToHub(subscribedStation!, `Waiting for signal`).catch(() => {}), 120_000);
     try {
       const result = await waitForSignal();
+
+      // If subscribed to a task station, auto-claim and return structured instructions
+      try {
+        const property = await fetchPropertyFromHub();
+        const asset = (property.assets || []).find(
+          (a: Asset) => a.station === subscribedStation && a.task
+        );
+        if (asset) {
+          let state = { status: "idle" } as Record<string, unknown>;
+          try { if (asset.content?.data) state = JSON.parse(asset.content.data); } catch {}
+
+          if (state.status === "pending") {
+            // Auto-claim
+            await fetch(`${HUB_URL}/api/task/${encodeURIComponent(subscribedStation!)}/claim`, {
+              method: "POST", headers: hubHeaders(),
+              body: JSON.stringify({ agent_id: AGENT_ID }),
+            });
+
+            const parts: string[] = [`# Task: ${subscribedStation}\n`];
+            const instructions = (asset as any).instructions;
+            if (instructions) parts.push(`## Instructions\n${instructions}\n`);
+            if (state.prompt) parts.push(`## Prompt\n${state.prompt}\n`);
+            parts.push(`## Required steps`);
+            parts.push(`1. Call update_state before EVERY step so viewers see you working (e.g. searching, reading, writing_code, thinking). This is mandatory.`);
+            parts.push(`2. Do the work described above`);
+            parts.push(`3. Call answer_task("${subscribedStation}", "<h2>Result</h2><p>your HTML</p>")`);
+            parts.push(`4. Then call check_events() again to wait for the next task`);
+            return { content: [{ type: "text" as const, text: parts.join("\n") }] };
+          }
+        }
+      } catch {}
+
       return { content: [{ type: "text" as const, text: result + "\n\nRemember to call update_state for your next activity." }] };
     } catch {
       return { content: [{ type: "text" as const, text: "No events (timeout). Remember to call update_state for your next activity." }] };
