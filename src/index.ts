@@ -85,6 +85,7 @@ const API_KEY = process.env.API_KEY;
 const BASE_ID = process.env.AGENT_ID || "default";
 const AGENT_ID = `${BASE_ID}-${Math.random().toString(36).slice(2, 6)}`;
 let agentName = process.env.AGENT_NAME || "Agent";
+let lastState: string = "idle";
 const AGENT_SPRITE = process.env.AGENT_SPRITE || "";
 const repo = detectRepo();
 const OWNER_ID = process.env.OWNER_ID || repo.id;
@@ -253,10 +254,24 @@ server.tool(
     ),
   },
   async ({ state, detail, note }) => {
+    lastState = state;
     const welcome = await reportToHub(state, detail, AGENT_ID, agentName, null, undefined, note);
     const msg = `State updated to "${state}" (${getGroup(state)}): ${detail}`;
     const text = welcome ? `${msg}\n\n${formatWelcome(welcome)}` : msg;
     return { content: [{ type: "text" as const, text }] };
+  }
+);
+
+server.tool(
+  "say",
+  "Update your speech bubble without changing state or moving. " +
+    "Use for status messages, thoughts, or progress updates while staying at your current station.",
+  {
+    text: z.string().describe('What to say, e.g. "Almost done..." or "Found 3 results"'),
+  },
+  async ({ text }) => {
+    await reportToHub(lastState, text);
+    return { content: [{ type: "text" as const, text: `Said: "${text}"` }] };
   }
 );
 
