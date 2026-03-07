@@ -67,15 +67,8 @@ export function register(server: McpServer): void {
         if (dtos.length === 0) return { content: [{ type: "text" as const, text: `No DTOs waiting at "${station}"` }] };
 
         const dto = dtos[0];
-        const delRes = await fetch(`${HUB_URL}/api/queue/${encodeURIComponent(station)}/${dto.id}`, {
-          method: "DELETE", headers: hubHeaders(),
-        });
-        if (!delRes.ok) {
-          return { content: [{ type: "text" as const, text: `Failed to consume DTO` }] };
-        }
-
         const trail = dto.trail.map(e => `  - ${e.station} (${e.by}): ${e.data}`).join("\n");
-        return { content: [{ type: "text" as const, text: `DTO ${dto.id} (type: ${dto.type})\nTrail:\n${trail}` }] };
+        return { content: [{ type: "text" as const, text: `DTO ${dto.id} (type: ${dto.type}) at "${station}"\nTrail:\n${trail}\n\nCall forward_dto to move it to the next station, or delete it to end the pipeline.` }] };
       } catch (err) {
         return { content: [{ type: "text" as const, text: `Failed: ${err}` }] };
       }
