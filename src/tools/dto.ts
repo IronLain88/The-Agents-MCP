@@ -49,12 +49,14 @@ export function register(server: McpServer): void {
 
   server.tool(
     "receive_dto",
-    "Receive (pop) the next DTO from a station queue. Returns the DTO with its full trail. " +
-      "After processing, call forward_dto to send it to the next station.",
+    "Receive the next DTO from a station queue. Returns the DTO with its full trail. " +
+      "After processing, call forward_dto to send it to the next station. " +
+      "Pass dto_id to target a specific DTO (e.g. from a signal payload).",
     {
       station: z.string().describe("Station to receive from"),
+      dto_id: z.string().optional().describe("Optional: specific DTO id to receive (from signal payload)"),
     },
-    async ({ station }) => {
+    async ({ station, dto_id }) => {
       try {
         const res = await fetch(`${HUB_URL}/api/queue/${encodeURIComponent(station)}`, {
           headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
@@ -66,7 +68,7 @@ export function register(server: McpServer): void {
         const { dtos } = await res.json() as { dtos: Dto[] };
         if (dtos.length === 0) return { content: [{ type: "text" as const, text: `No DTOs waiting at "${station}"` }] };
 
-        const dto = dtos[0];
+        const dto = dto_id ? dtos.find(d => d.id === dto_id) || dtos[dtos.length - 1] : dtos[0];
         const trail = dto.trail.map(e => `  - ${e.station} (${e.by}): ${e.data}`).join("\n");
         return { content: [{ type: "text" as const, text: `DTO ${dto.id} (type: ${dto.type}) at "${station}"\nTrail:\n${trail}\n\nCall forward_dto to move it to the next station, or delete it to end the pipeline.` }] };
       } catch (err) {
