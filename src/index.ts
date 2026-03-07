@@ -16,6 +16,7 @@ import * as inboxTools from "./tools/inbox.js";
 import * as eventTools from "./tools/events.js";
 import * as receptionTools from "./tools/reception.js";
 import * as taskTools from "./tools/tasks.js";
+import * as dtoTools from "./tools/dto.js";
 
 const server = new McpServer({ name: "agent-visualizer", version: "1.0.0" });
 
@@ -26,6 +27,7 @@ inboxTools.register(server);
 eventTools.register(server);
 receptionTools.register(server);
 taskTools.register(server);
+dtoTools.register(server);
 
 async function main() {
   const httpPort = process.env.MCP_HTTP_PORT ? parseInt(process.env.MCP_HTTP_PORT) : null;
