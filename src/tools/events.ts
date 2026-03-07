@@ -2,8 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import WebSocket from "ws";
 import { HUB_URL, API_KEY, AGENT_ID } from "../lib/config.js";
-import { fetchPropertyFromHub, type Asset } from "../lib/hub.js";
-import { reportToHub } from "../lib/hub.js";
+import { fetchPropertyFromHub, reportToHub, type Asset } from "../lib/hub.js";
 import {
   getSubscribedStations, setSubscribedStations, isWsOpen,
   connectSignalWs, waitForSignal, tryClaimPendingTask,

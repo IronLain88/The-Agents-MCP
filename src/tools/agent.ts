@@ -1,8 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { AGENT_ID, agentState, getGroup } from "../lib/config.js";
+import { AGENT_ID, API_KEY, HUB_URL, agentState, getGroup } from "../lib/config.js";
 import { reportToHub, formatWelcome } from "../lib/hub.js";
-import { API_KEY, HUB_URL } from "../lib/config.js";
 
 export function register(server: McpServer): void {
   server.tool(
