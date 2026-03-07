@@ -1,5 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createServer as createHttpServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readFile } from "fs/promises";
 import { findAsset } from "./lib/asset-lookup.js";
@@ -548,7 +551,7 @@ server.tool(
   {
     station: z.string().describe('Station name, e.g. "News Desk" or "writing_code"'),
     data: z.string().describe("Content to post (max 10KB)"),
-    type: z.enum(["text", "markdown", "json"]).optional().describe("Content type (default: text)"),
+    type: z.enum(["text", "markdown", "json", "html"]).optional().describe("Content type (default: text)"),
   },
   async ({ station, data, type }) => {
     try {
@@ -1236,24 +1239,67 @@ server.tool(
 // --- Main ---
 
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("[agent-visualizer] MCP server connected via stdio");
-  console.error(`[agent-visualizer] Reporting to hub at ${HUB_URL} as "${agentName}" (${AGENT_ID})`);
+  const httpPort = process.env.MCP_HTTP_PORT ? parseInt(process.env.MCP_HTTP_PORT) : null;
 
-  // Register main agent and residents as idle
-  await reportToHub("idle", "Agent connected");
+  if (httpPort) {
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+    await server.connect(transport);
 
-  // Register residents from property (if any)
-  try {
-    const property = await fetchPropertyFromHub();
-    const residents = (property.residents as { id: string; name: string }[] | undefined) || [];
-    for (const r of residents) {
-      await reportToHub("idle", "Waiting", r.id, r.name, AGENT_ID);
-      console.error(`[agent-visualizer] Registered resident "${r.name}" (${r.id})`);
+    const httpServer = createHttpServer(async (req, res) => {
+      try {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "content-type, mcp-session-id, authorization");
+
+        if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
+        if (API_KEY) {
+          if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Unauthorized" }));
+            return;
+          }
+        }
+
+        let body: unknown;
+        if (req.method === "POST") {
+          const chunks: Buffer[] = [];
+          req.on("data", (chunk: Buffer) => chunks.push(chunk));
+          await new Promise<void>(r => req.on("end", r));
+          const raw = Buffer.concat(chunks).toString();
+          body = raw ? JSON.parse(raw) : undefined;
+        }
+
+        await transport.handleRequest(req, res, body);
+      } catch (err) {
+        console.error("[mcp-http] Request error:", err);
+        if (!res.headersSent) { res.writeHead(500); res.end(); }
+      }
+    });
+
+    httpServer.listen(httpPort, "0.0.0.0", () => {
+      console.error(`[agent-visualizer] MCP HTTP server on port ${httpPort}`);
+    });
+
+    await reportToHub("idle", "Connected via HTTP MCP");
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("[agent-visualizer] MCP server connected via stdio");
+    console.error(`[agent-visualizer] Reporting to hub at ${HUB_URL} as "${agentName}" (${AGENT_ID})`);
+
+    await reportToHub("idle", "Agent connected");
+
+    try {
+      const property = await fetchPropertyFromHub();
+      const residents = (property.residents as { id: string; name: string }[] | undefined) || [];
+      for (const r of residents) {
+        await reportToHub("idle", "Waiting", r.id, r.name, AGENT_ID);
+        console.error(`[agent-visualizer] Registered resident "${r.name}" (${r.id})`);
+      }
+    } catch (err) {
+      console.error("[agent-visualizer] Could not fetch property for residents:", err);
     }
-  } catch (err) {
-    console.error("[agent-visualizer] Could not fetch property for residents:", err);
   }
 }
 
