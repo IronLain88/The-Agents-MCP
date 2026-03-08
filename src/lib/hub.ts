@@ -3,7 +3,6 @@ import { HUB_URL, API_KEY, AGENT_ID, AGENT_SPRITE, OWNER_ID, OWNER_NAME, agentSt
 export interface WelcomeData {
   stations: string[];
   signals: string[];
-  boards: string[];
   tasks: string[];
   openclawTasks?: string[];
   inbox: number;
@@ -81,7 +80,6 @@ export function formatWelcome(w: WelcomeData): string {
     for (const t of w.openclawTasks) lines.push(`  - ${t}`);
   }
   if (w.signals.length > 0) lines.push(`**Signals:** ${w.signals.join(", ")}`);
-  if (w.boards.length > 0) lines.push(`**Boards with content:** ${w.boards.join(", ")}`);
   return lines.join("\n");
 }
 

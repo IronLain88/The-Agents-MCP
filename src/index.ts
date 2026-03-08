@@ -11,7 +11,6 @@ import { handleOAuthRoute } from "./lib/oauth.js";
 
 import * as agentTools from "./tools/agent.js";
 import * as assetTools from "./tools/assets.js";
-import * as boardTools from "./tools/boards.js";
 import * as inboxTools from "./tools/inbox.js";
 import * as eventTools from "./tools/events.js";
 import * as receptionTools from "./tools/reception.js";
@@ -22,7 +21,6 @@ const server = new McpServer({ name: "agent-visualizer", version: "1.0.0" });
 
 agentTools.register(server);
 assetTools.register(server);
-boardTools.register(server);
 inboxTools.register(server);
 eventTools.register(server);
 receptionTools.register(server);

@@ -1,7 +1,6 @@
 export interface WelcomeData {
     stations: string[];
     signals: string[];
-    boards: string[];
     tasks: string[];
     openclawTasks?: string[];
     inbox: number;
