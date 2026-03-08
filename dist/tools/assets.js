@@ -41,7 +41,7 @@ export function register(server) {
         station: z.string().optional().describe("Station name — your agent walks here when in this state"),
         approach: z.enum(["above", "below", "left", "right"]).optional().describe("Which side the agent stands on"),
         collision: z.boolean().optional().describe("Block movement through this tile"),
-        remote_url: z.string().optional().describe("Remote hub URL to read a board from another property"),
+        remote_url: z.string().optional().describe("Remote hub URL"),
         remote_station: z.string().optional().describe("Station name on the remote hub"),
         openclaw_task: z.boolean().optional().describe("Mark as an OpenClaw auto-spawn task station"),
         archive: z.boolean().optional().describe("Mark as an archive station"),

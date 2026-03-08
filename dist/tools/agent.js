@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AGENT_ID, API_KEY, HUB_URL, agentState, getGroup } from "../lib/config.js";
 import { reportToHub, formatWelcome } from "../lib/hub.js";
 export function register(server) {
-    server.tool("get_village_info", "Get a summary of your property: available stations, signals, boards, and inbox. Called automatically on first connect, but useful to refresh.", {}, async () => {
+    server.tool("get_village_info", "Get a summary of your property: available stations, signals, and inbox. Called automatically on first connect, but useful to refresh.", {}, async () => {
         try {
             const res = await fetch(`${HUB_URL}/api/welcome`, {
                 headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},

@@ -54,8 +54,6 @@ export function formatWelcome(w) {
     }
     if (w.signals.length > 0)
         lines.push(`**Signals:** ${w.signals.join(", ")}`);
-    if (w.boards.length > 0)
-        lines.push(`**Boards with content:** ${w.boards.join(", ")}`);
     return lines.join("\n");
 }
 export async function fetchPropertyFromHub() {

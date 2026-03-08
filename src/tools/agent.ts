@@ -6,7 +6,7 @@ import { reportToHub, formatWelcome } from "../lib/hub.js";
 export function register(server: McpServer): void {
   server.tool(
     "get_village_info",
-    "Get a summary of your property: available stations, signals, boards, and inbox. Called automatically on first connect, but useful to refresh.",
+    "Get a summary of your property: available stations, signals, and inbox. Called automatically on first connect, but useful to refresh.",
     {},
     async () => {
       try {
