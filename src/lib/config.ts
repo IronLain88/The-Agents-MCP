@@ -38,7 +38,7 @@ try {
 
 export const API_KEY = process.env.API_KEY;
 export const AGENT_ID = `${process.env.AGENT_ID || "default"}-${Math.random().toString(36).slice(2, 6)}`;
-export const AGENT_SPRITE = process.env.AGENT_SPRITE || "";
+export const AGENT_SPRITE = process.env.AGENT_SPRITE || "Kael";
 
 const repo = detectRepo();
 export const OWNER_ID = process.env.OWNER_ID || repo.id;
