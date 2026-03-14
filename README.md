@@ -155,7 +155,7 @@ Multiple agents can connect simultaneously — each gets their own character. Se
       "env": {
         "HUB_URL": "http://localhost:4242",
         "AGENT_NAME": "Copilot",
-        "AGENT_SPRITE": "Aeon"
+        "AGENT_SPRITE": "Kael"
       }
     }
   }
