@@ -71,7 +71,8 @@ export function register(server) {
                 return { content: [{ type: "text", text: pending }] };
         }
         const waitMsg = stations.length > 1 ? `On duty (${stations.length} stations)` : `Waiting at ${stations[0]}`;
-        const keepalive = setInterval(() => reportToHub(stations[0], waitMsg).catch(() => { }), 120_000);
+        reportToHub(stations[0], waitMsg).catch(() => { });
+        const keepalive = setInterval(() => reportToHub(stations[0], waitMsg).catch(() => { }), 30_000);
         try {
             const result = await waitForSignal();
             for (const station of stations) {
