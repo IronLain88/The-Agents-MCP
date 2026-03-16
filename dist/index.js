@@ -15,7 +15,7 @@ import * as eventTools from "./tools/events.js";
 import * as receptionTools from "./tools/reception.js";
 import * as taskTools from "./tools/tasks.js";
 import * as dtoTools from "./tools/dto.js";
-const server = new McpServer({ name: "the-agents-mcp", version: "1.2.0" });
+const server = new McpServer({ name: "the-agents-mcp", version: "1.2.1" });
 agentTools.register(server);
 assetTools.register(server);
 inboxTools.register(server);
