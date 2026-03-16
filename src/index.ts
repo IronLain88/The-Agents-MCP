@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -17,7 +18,7 @@ import * as receptionTools from "./tools/reception.js";
 import * as taskTools from "./tools/tasks.js";
 import * as dtoTools from "./tools/dto.js";
 
-const server = new McpServer({ name: "agent-visualizer", version: "1.0.0" });
+const server = new McpServer({ name: "the-agents-mcp", version: "1.2.0" });
 
 agentTools.register(server);
 assetTools.register(server);
