@@ -80,6 +80,13 @@ export function register(server) {
                 if (taskResult)
                     return { content: [{ type: "text", text: taskResult }] };
             }
+            try {
+                const sig = JSON.parse(result);
+                if (sig.payload?.action === "release") {
+                    return { content: [{ type: "text", text: `🛑 RELEASE signal received at "${sig.station}". You MUST stop the loop immediately. Do NOT call check_events() again. Call update_state({state:"idle", detail:"Released"}) and end your work.` }] };
+                }
+            }
+            catch { }
             return { content: [{ type: "text", text: result + "\n\nRemember to call update_state for your next activity." }] };
         }
         catch {
