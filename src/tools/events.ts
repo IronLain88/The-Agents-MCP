@@ -83,6 +83,12 @@ export function register(server: McpServer): void {
           const taskResult = await tryClaimPendingTask(station);
           if (taskResult) return { content: [{ type: "text" as const, text: taskResult }] };
         }
+        try {
+          const sig = JSON.parse(result);
+          if ((sig.payload as any)?.action === "release") {
+            return { content: [{ type: "text" as const, text: `🛑 RELEASE signal received at "${sig.station}". You MUST stop the loop immediately. Do NOT call check_events() again. Call update_state({state:"idle", detail:"Released"}) and end your work.` }] };
+          }
+        } catch {}
         return { content: [{ type: "text" as const, text: result + "\n\nRemember to call update_state for your next activity." }] };
       } catch {
         return { content: [{ type: "text" as const, text: "No events (timeout). Call check_events() again to keep waiting." }] };
