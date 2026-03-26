@@ -10,23 +10,11 @@ import { HUB_URL, API_KEY, AGENT_ID, agentState } from "./lib/config.js";
 import { reportToHub, fetchPropertyFromHub } from "./lib/hub.js";
 import { handleOAuthRoute } from "./lib/oauth.js";
 
-import * as agentTools from "./tools/agent.js";
-import * as assetTools from "./tools/assets.js";
-import * as inboxTools from "./tools/inbox.js";
-import * as eventTools from "./tools/events.js";
-import * as receptionTools from "./tools/reception.js";
-import * as taskTools from "./tools/tasks.js";
-import * as dtoTools from "./tools/dto.js";
+import { registerTools } from "./tools.js";
 
-const server = new McpServer({ name: "the-agents-mcp", version: "1.2.1" });
+const server = new McpServer({ name: "the-agents-mcp", version: "1.3.0" });
 
-agentTools.register(server);
-assetTools.register(server);
-inboxTools.register(server);
-eventTools.register(server);
-receptionTools.register(server);
-taskTools.register(server);
-dtoTools.register(server);
+registerTools(server);
 
 async function main() {
   const httpPort = process.env.MCP_HTTP_PORT ? parseInt(process.env.MCP_HTTP_PORT) : null;
