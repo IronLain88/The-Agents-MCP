@@ -23,8 +23,8 @@ export function register(server: McpServer): void {
 
         if (!name) {
           const taskStations = (property.assets || []).filter((a: Asset) => {
-            if (!a.task || (a as any).openclaw_task) return false;
-            const assignedTo = (a as any).assigned_to;
+            if (!a.task || a.task.openclaw) return false;
+            const assignedTo = a.task.assigned_to;
             return !assignedTo || AGENT_ID.startsWith(assignedTo);
           });
           if (taskStations.length === 0) {
@@ -40,7 +40,7 @@ export function register(server: McpServer): void {
           return { content: [{ type: "text" as const, text: `Subscribed to ${stations.length} task station(s): ${stations.join(", ")}. Call check_events() to wait for work.${pendingNote}` }] };
         }
 
-        const asset = (property.assets || []).find((a: Asset) => a.station === name && (a.trigger || a.task));
+        const asset = (property.assets || []).find((a: Asset) => a.station === name && (a.signal || a.task));
         if (!asset) return { content: [{ type: "text" as const, text: `No signal or task station "${name}" found on property` }] };
         setSubscribedStations([name]);
         if (!isWsOpen()) connectSignalWs();
@@ -51,7 +51,7 @@ export function register(server: McpServer): void {
           const pending = state.status === "pending" ? " A task is already pending — call check_events() now." : "";
           return { content: [{ type: "text" as const, text: `Subscribed to task station "${name}". Call check_events() to wait for work.${pending}` }] };
         }
-        return { content: [{ type: "text" as const, text: `Subscribed to "${name}" (${asset.trigger} every ${asset.trigger_interval || 1} min). Call check_events() to wait.` }] };
+        return { content: [{ type: "text" as const, text: `Subscribed to "${name}" (${asset.signal?.type} every ${asset.signal?.interval || 60}s). Call check_events() to wait.` }] };
       } catch (err) {
         return { content: [{ type: "text" as const, text: `Subscribe failed: ${err}` }] };
       }

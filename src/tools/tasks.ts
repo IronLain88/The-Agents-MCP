@@ -21,7 +21,7 @@ export function register(server: McpServer): void {
         try { if (asset.content?.data) state = JSON.parse(asset.content.data); } catch {}
 
         if (state.status === "pending") {
-          const instructions = (asset as any).instructions;
+          const instructions = asset.task?.instructions;
           if (instructions) parts.push(`## Instructions\n${instructions}\n`);
           parts.push(`## What to do`);
           parts.push(`1. Call update_state before EVERY step so viewers see you working. This is mandatory.`);
@@ -52,11 +52,11 @@ export function register(server: McpServer): void {
         const property = await fetchPropertyFromHub();
         const asset = (property.assets || []).find((a: Asset) => a.station === station && a.task);
         if (!asset) return { content: [{ type: "text" as const, text: `No task station "${station}" found` }] };
-        if ((asset as any).openclaw_task) return { content: [{ type: "text" as const, text: `"${station}" is an openclaw_task station — do NOT call work_task on these.` }] };
-        if ((asset as any).assigned_to && !AGENT_ID.startsWith((asset as any).assigned_to)) {
-          return { content: [{ type: "text" as const, text: `Task "${station}" is assigned to "${(asset as any).assigned_to}" only. Your agent ID "${AGENT_ID}" does not match.` }] };
+        if (asset.task?.openclaw) return { content: [{ type: "text" as const, text: `"${station}" is an openclaw task station — do NOT call work_task on these.` }] };
+        if (asset.task?.assigned_to && !AGENT_ID.startsWith(asset.task.assigned_to)) {
+          return { content: [{ type: "text" as const, text: `Task "${station}" is assigned to "${asset.task.assigned_to}" only. Your agent ID "${AGENT_ID}" does not match.` }] };
         }
-        if (!asset.trigger) return { content: [{ type: "text" as const, text: `Task station "${station}" has no trigger` }] };
+        if (!asset.signal) return { content: [{ type: "text" as const, text: `Task station "${station}" has no signal` }] };
 
         let state = { status: "idle" } as Record<string, unknown>;
         try { if (asset.content?.data) state = JSON.parse(asset.content.data); } catch {}
@@ -77,7 +77,7 @@ export function register(server: McpServer): void {
         const fresh = await fetchPropertyFromHub();
         const freshAsset = (fresh.assets || []).find((a: Asset) => a.station === station && a.task);
         const parts: string[] = [`# Task: ${station}\n`];
-        const instructions = (freshAsset as any)?.instructions;
+        const instructions = freshAsset?.task?.instructions;
         if (instructions) parts.push(`## Instructions\n${instructions}\n`);
         parts.push(`## Required steps`);
         parts.push(`1. Call update_state before EVERY step so viewers see you working. This is mandatory.`);
@@ -115,11 +115,11 @@ export function register(server: McpServer): void {
         try {
           const property = await fetchPropertyFromHub();
           const asset = (property.assets || []).find((a: Asset) => a.station === station && a.task);
-          if ((asset as any)?.openclaw_task) isOpenclawTask = true;
+          if (asset?.task?.openclaw) isOpenclawTask = true;
         } catch {}
 
         return { content: [{ type: "text" as const, text: isOpenclawTask
-          ? `Result posted to "${station}".\n\n✅ Your work is done. This is an openclaw_task station — no need to loop. You may exit or go idle.`
+          ? `Result posted to "${station}".\n\n✅ Your work is done. This is an openclaw task station — no need to loop. You may exit or go idle.`
           : `Result posted to "${station}".\n\n⚠️ REQUIRED NEXT STEP: Call check_events() now to wait for the next task. Do not stop — the loop must continue.`
         }] };
       } catch (err) {

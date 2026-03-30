@@ -6,11 +6,11 @@ export function register(server) {
         "Use this after walking to a reception station to get your instructions and check for pending questions.", { station: z.string().describe('The reception station name, e.g. "Help Desk"') }, async ({ station }) => {
         try {
             const property = await fetchPropertyFromHub();
-            const asset = (property.assets || []).find((a) => a.station === station && a.reception);
+            const asset = (property.assets || []).find((a) => a.station === station && a.task?.type === "reception");
             if (!asset)
                 return { content: [{ type: "text", text: `No reception station "${station}" found` }] };
             const parts = [`# Reception: ${station}\n`];
-            const instructions = asset.instructions;
+            const instructions = asset.task?.instructions;
             if (instructions)
                 parts.push(`## Instructions\n${instructions}\n`);
             let state = { status: "idle", question: null, answer: null };

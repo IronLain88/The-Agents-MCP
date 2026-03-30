@@ -15,10 +15,16 @@ export interface Asset {
   position: { x: number; y: number } | null;
   station?: string;
   content?: { type: string; data: string; source?: string; publishedAt?: string };
-  trigger?: string;
-  trigger_interval?: number;
-  task?: boolean;
-  openclaw_task?: boolean;
+  signal?: { type: string; interval?: number; payload?: unknown; allow_payload?: boolean };
+  task?: { type: string; public: boolean; openclaw: boolean; instructions?: string; assigned_to?: string; completion_target?: string };
+  prompt?: { template?: string; vars?: Record<string, string> };
+  display?: { text?: string; color?: string; bob?: boolean; ox?: number; oy?: number };
+  queue?: { max_trail?: number; forward_to?: string };
+  remote?: { url: string; station?: string };
+  archive?: boolean;
+  welcome?: boolean;
+  sign?: boolean;
+  knowledge?: boolean;
 }
 
 export function hubHeaders(): Record<string, string> {

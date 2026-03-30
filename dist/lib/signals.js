@@ -83,7 +83,7 @@ export async function tryClaimPendingTask(station) {
             body: JSON.stringify({ agent_id: AGENT_ID }),
         });
         const parts = [`# Task: ${station}\n`];
-        const instructions = asset.instructions;
+        const instructions = asset.task?.instructions;
         const prompt = state.prompt;
         if (instructions && prompt) {
             parts.push(`## Instructions\n${instructions}\n`, `## Request\n${prompt}\n`);
