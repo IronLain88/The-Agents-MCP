@@ -12,11 +12,11 @@ export function register(server: McpServer): void {
     async ({ station }) => {
       try {
         const property = await fetchPropertyFromHub();
-        const asset = (property.assets || []).find((a: Asset) => a.station === station && (a as any).reception);
+        const asset = (property.assets || []).find((a: Asset) => a.station === station && a.task?.type === "reception");
         if (!asset) return { content: [{ type: "text" as const, text: `No reception station "${station}" found` }] };
 
         const parts: string[] = [`# Reception: ${station}\n`];
-        const instructions = (asset as any).instructions;
+        const instructions = asset.task?.instructions;
         if (instructions) parts.push(`## Instructions\n${instructions}\n`);
 
         let state = { status: "idle", question: null as string | null, answer: null as string | null };

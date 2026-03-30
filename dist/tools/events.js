@@ -12,9 +12,9 @@ export function register(server) {
             const property = await fetchPropertyFromHub();
             if (!name) {
                 const taskStations = (property.assets || []).filter((a) => {
-                    if (!a.task || a.openclaw_task)
+                    if (!a.task || a.task.openclaw)
                         return false;
-                    const assignedTo = a.assigned_to;
+                    const assignedTo = a.task.assigned_to;
                     return !assignedTo || AGENT_ID.startsWith(assignedTo);
                 });
                 if (taskStations.length === 0) {
@@ -35,7 +35,7 @@ export function register(server) {
                 const pendingNote = pending.length > 0 ? ` ${pending.length} task(s) already pending — call check_events() now.` : "";
                 return { content: [{ type: "text", text: `Subscribed to ${stations.length} task station(s): ${stations.join(", ")}. Call check_events() to wait for work.${pendingNote}` }] };
             }
-            const asset = (property.assets || []).find((a) => a.station === name && (a.trigger || a.task));
+            const asset = (property.assets || []).find((a) => a.station === name && (a.signal || a.task));
             if (!asset)
                 return { content: [{ type: "text", text: `No signal or task station "${name}" found on property` }] };
             setSubscribedStations([name]);
@@ -51,7 +51,7 @@ export function register(server) {
                 const pending = state.status === "pending" ? " A task is already pending — call check_events() now." : "";
                 return { content: [{ type: "text", text: `Subscribed to task station "${name}". Call check_events() to wait for work.${pending}` }] };
             }
-            return { content: [{ type: "text", text: `Subscribed to "${name}" (${asset.trigger} every ${asset.trigger_interval || 1} min). Call check_events() to wait.` }] };
+            return { content: [{ type: "text", text: `Subscribed to "${name}" (${asset.signal?.type} every ${asset.signal?.interval || 60}s). Call check_events() to wait.` }] };
         }
         catch (err) {
             return { content: [{ type: "text", text: `Subscribe failed: ${err}` }] };
