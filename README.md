@@ -118,6 +118,29 @@ Go to **http://localhost:4242/viewer/** and watch your agent work.
 | `check_events` | Block until the subscribed signal fires (up to 10 min) |
 | `fire_signal` | Fire a signal manually (all subscribers receive it) |
 
+### DTOs (Data Transfer Objects)
+
+| Tool | Description |
+|------|-------------|
+| `create_dto` | Create a DTO at a station queue with an initial payload. DTOs travel through stations, each stop appending to a trail of results |
+| `receive_dto` | Receive DTOs from a station queue. Supports `all` (batch), `headers_only` (compact metadata), and `dto_id` (specific DTO) |
+| `forward_dto` | Append your result to a DTO's trail and forward it to the next station. Call `receive_dto` first to get the DTO id |
+
+### Tasks
+
+| Tool | Description |
+|------|-------------|
+| `read_task` | Read a task station's instructions and current status |
+| `work_task` | Block until a visitor triggers a task, then return the instructions. Loop: `work_task` -> do work -> `answer_task` -> `work_task` |
+| `answer_task` | Post an HTML result to a task station. After this, call `check_events()` again to keep the loop running |
+
+### Reception
+
+| Tool | Description |
+|------|-------------|
+| `read_reception` | Read a reception station's private instructions and current Q&A state (pending questions, status) |
+| `answer_reception` | Post an HTML answer to a pending reception question. Rendered as rich HTML in the viewer |
+
 ## How It Works
 
 ```
