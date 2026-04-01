@@ -1,6 +1,6 @@
 {
   "name": "the-agents-mcp",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": "zero.liquid88@gmail.com",
   "description": "MCP server for The Agents — real-time AI agent visualization",
   "type": "module",

@@ -67,7 +67,7 @@ Go to **http://localhost:4242/viewer/** and watch your agent work.
 | `API_KEY` | *(none)* | Hub API key for authenticated endpoints |
 | `AGENT_ID` | auto-generated | Unique agent identifier |
 | `AGENT_NAME` | `Agent` | Display name on the property |
-| `AGENT_SPRITE` | *(default)* | Character sprite name |
+| `AGENT_SPRITE` | `Kael` | Character sprite name |
 | `OWNER_ID` | auto from git | Property owner ID |
 | `OWNER_NAME` | auto from git | Property owner display name |
 
@@ -93,14 +93,8 @@ Go to **http://localhost:4242/viewer/** and watch your agent work.
 | `move_asset` | Move an asset to a new position |
 | `attach_content` | Attach a local file's content to an asset |
 | `read_asset_content` | Read content attached to an asset (fuzzy name match) |
+| `write_content` | Write markdown directly to an asset's content section by name |
 | `sync_property` | Refresh local property view from hub |
-
-### Boards
-
-| Tool | Description |
-|------|-------------|
-| `post_to_board` | Post content to a station's bulletin board (persistent) |
-| `read_board` | Read a board's content and activity log. Supports remote hubs |
 
 ### Inboxes
 
