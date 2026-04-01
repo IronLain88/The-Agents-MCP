@@ -170,6 +170,33 @@ export function register(server: McpServer): void {
   );
 
   server.tool(
+    "write_content",
+    "Write markdown content directly to an asset's content section by name or station",
+    {
+      name: z.string().describe("Asset name, station, or ID (fuzzy match)"),
+      content: z.string().describe("Markdown content to write"),
+    },
+    async ({ name, content }) => {
+      try {
+        const property = await fetchPropertyFromHub();
+        const asset = findAsset(property.assets || [], name);
+        if (!asset) return { content: [{ type: "text" as const, text: `Asset "${name}" not found. Use list_assets to see available assets.` }] };
+        const res = await fetch(`${HUB_URL}/api/assets/${encodeURIComponent(asset.id)}`, {
+          method: "PATCH", headers: hubHeaders(),
+          body: JSON.stringify({ content: { type: "markdown", data: content } }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          return { content: [{ type: "text" as const, text: `Failed to write: ${(err as { error: string }).error}` }] };
+        }
+        return { content: [{ type: "text" as const, text: `Content written to "${asset.name || asset.station || asset.id}" (${content.length} chars)` }] };
+      } catch (err) {
+        return { content: [{ type: "text" as const, text: `Failed to write content: ${err}` }] };
+      }
+    }
+  );
+
+  server.tool(
     "read_asset_content",
     "Read content attached to an asset on your property by name or ID",
     { name: z.string().describe("Asset name or ID (fuzzy match)") },
